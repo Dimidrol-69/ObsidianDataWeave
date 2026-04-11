@@ -109,80 +109,19 @@ register_global_skill() {
 
     mkdir -p "${SKILL_DIR}/references"
 
-    # Generate global SKILL.md with absolute paths to this repo
-    cat > "${SKILL_DIR}/SKILL.md" <<SKILL_EOF
----
-description: "Obsidian notes processing: enrich/atomize with Zettelkasten + .docx import"
-trigger_phrases:
-  - process note
-  - enrich note
-  - atomize note
-  - docx import
-  - zettelkasten rules
-  - обработай заметку
-  - обогати заметку
-  - разбей заметку
-  - обработай документ
-  - импортируй документ
-  - правила заметок
----
-
-# ObsidianDataWeave
-
-Obsidian note processing pipeline: Zettelkasten atomization, enrichment, and .docx import.
-
-Repository: ${REPO_DIR}
-
-## Commands
-
-Process an existing note (auto-detects enrich/atomize):
-\`\`\`bash
-cd ${REPO_DIR} && python3 scripts/process_note.py "Note Title"
-\`\`\`
-
-Import a .docx document into the vault:
-\`\`\`bash
-cd ${REPO_DIR} && python3 scripts/process.py "Document.docx"
-\`\`\`
-
-Preview without changes:
-\`\`\`bash
-cd ${REPO_DIR} && python3 scripts/process_note.py "Note Title" --dry-run
-\`\`\`
-
-Non-interactive mode (safe for agents):
-\`\`\`bash
-cd ${REPO_DIR} && python3 scripts/process.py "Doc.docx" --non-interactive --on-conflict skip
-cd ${REPO_DIR} && python3 scripts/process_note.py "Note" --mode atomize --non-interactive --on-conflict skip
-\`\`\`
-
-Dedup review:
-\`\`\`bash
-cd ${REPO_DIR} && python3 scripts/dedup_vault.py --dry-run
-\`\`\`
-
-Check setup:
-\`\`\`bash
-cd ${REPO_DIR} && python3 scripts/doctor.py
-\`\`\`
-
-## Rules
-
-For detailed Zettelkasten rules, load the reference files:
-- \`references/atomization-rules.md\` — note splitting
-- \`references/taxonomy-rules.md\` — tags, wikilinks, MOC, frontmatter
-- \`references/personal-notes-rules.md\` — personal note specifics
-- \`references/tags.yaml\` — canonical tag taxonomy
-
-## Agent Contract
-
-Full agent contract: \`${REPO_DIR}/AGENTS.md\`
-SKILL_EOF
+    # Symlink SKILL.md from the repo so trigger phrases, intent mapping and
+    # the NotebookLM auth/research protocol stay in sync on `git pull`.
+    # Replace any previous generated copy first.
+    if [[ -e "${SKILL_DIR}/SKILL.md" && ! -L "${SKILL_DIR}/SKILL.md" ]]; then
+        rm -f "${SKILL_DIR}/SKILL.md"
+    fi
+    ln -sf "${REPO_DIR}/SKILL.md" "${SKILL_DIR}/SKILL.md"
 
     # Symlink references (auto-update on git pull)
     ln -sf "${REPO_DIR}/rules/atomization.md" "${SKILL_DIR}/references/atomization-rules.md"
     ln -sf "${REPO_DIR}/rules/taxonomy.md" "${SKILL_DIR}/references/taxonomy-rules.md"
     ln -sf "${REPO_DIR}/rules/personal_notes.md" "${SKILL_DIR}/references/personal-notes-rules.md"
+    ln -sf "${REPO_DIR}/rules/contacts.md" "${SKILL_DIR}/references/contacts-rules.md"
     ln -sf "${REPO_DIR}/tags.yaml" "${SKILL_DIR}/references/tags.yaml"
 
     echo "Skill registered at: ${SKILL_DIR}"
