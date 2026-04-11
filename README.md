@@ -87,6 +87,48 @@ bash install.sh --vault-path "/путь/к/вашему/vault"
 | `process_note "Note" --mode atomize` | Принудительная атомизация заметки |
 | `dedup --dry-run` | Показать дубликаты без изменений |
 
+### NotebookLM как источник
+
+Помимо `.docx` из Google Drive, ObsidianDataWeave умеет брать заметки из notebook'ов NotebookLM через `scripts/process_notebook.py <notebook_id>`. Атомайзер видит все заметки нотбука как один корпус и строит вики-ссылки поверх нескольких источников одновременно.
+
+#### Первый вход в аккаунт
+
+Сессия Google сохраняется в `~/.notebooklm/storage_state.json` и переиспользуется — вход одноразовый.
+
+1. Создайте venv и установите зависимости:
+
+```bash
+python3 -m venv .venv
+.venv/bin/python scripts/notebooklm_setup.py --skip-login
+```
+
+Скрипт поставит `notebooklm-py[browser]` и браузер Playwright Chromium в активный venv. Флаг `--skip-login` отделяет установку от интерактивного входа — логин делаем вручную в следующем шаге, потому что `notebooklm login` требует настоящий TTY.
+
+> **Arch / Manjaro / Debian:** системный `pip` заблокирован PEP 668, так что venv обязателен. Скрипт автоматически определяет venv и больше не передаёт `--user`. Без venv (на обычный системный Python) установка упадёт с подсказкой создать venv.
+
+2. **Откройте отдельное окно терминала** и выполните:
+
+```bash
+cd /путь/к/ObsidianDataWeave
+.venv/bin/notebooklm login
+```
+
+> Не запускайте это через префикс `!` в Claude Code или Codex — у такой сессии нет интерактивного stdin, и `notebooklm login` упадёт с `Aborted!` в момент ожидания `ENTER`.
+
+3. В открывшемся окне Chromium войдите в Google-аккаунт и дождитесь загрузки главной NotebookLM.
+
+4. Вернитесь в терминал и нажмите **ENTER** — `storage_state.json` сохранится.
+
+Проверка: файл `~/.notebooklm/storage_state.json` должен появиться.
+
+#### Использование
+
+```bash
+.venv/bin/python scripts/process_notebook.py <notebook_id>
+```
+
+`<notebook_id>` — последний сегмент URL вашего нотбука: `https://notebooklm.google.com/notebook/<notebook_id>`. Флаги `--include-sources` и `--include-mindmap` добавляют индексированные источники и mind map. Для нескольких аккаунтов используйте `--profile <имя>`.
+
 ### Что происходит под капотом
 
 ```
@@ -262,6 +304,48 @@ More examples:
 | `process note "Title"` | Enrich or atomize an existing note |
 | `process_note "Note" --mode atomize` | Force atomization of a note |
 | `dedup --dry-run` | Show duplicates without changes |
+
+### NotebookLM as a source
+
+In addition to `.docx` from Google Drive, ObsidianDataWeave can pull curated notes from NotebookLM notebooks via `scripts/process_notebook.py <notebook_id>`. The atomizer sees every note in the notebook as one batch and can build wikilinks across multiple sources at once.
+
+#### First-time login
+
+The Google session is stored in `~/.notebooklm/storage_state.json` and reused — you only log in once.
+
+1. Create a venv and install the dependencies:
+
+```bash
+python3 -m venv .venv
+.venv/bin/python scripts/notebooklm_setup.py --skip-login
+```
+
+The script installs `notebooklm-py[browser]` and the Playwright Chromium browser into the active venv. The `--skip-login` flag separates installation from the interactive login — we handle the login manually in the next step because `notebooklm login` needs a real TTY.
+
+> **Arch / Manjaro / Debian:** the system `pip` is locked down by PEP 668, so a venv is required. The script auto-detects venv and no longer passes `--user`. Running it against the system Python without a venv will fail fast with guidance to create one.
+
+2. **Open a separate terminal window** and run:
+
+```bash
+cd /path/to/ObsidianDataWeave
+.venv/bin/notebooklm login
+```
+
+> Do not run this via the `!` prefix inside Claude Code or Codex — such a session has no interactive stdin, and `notebooklm login` will abort with `Aborted!` the moment it asks you to press `ENTER`.
+
+3. Sign in to Google in the Chromium window that opens and wait until the NotebookLM homepage loads.
+
+4. Return to the terminal and press **ENTER** — `storage_state.json` is saved.
+
+Verify: the file `~/.notebooklm/storage_state.json` should now exist.
+
+#### Usage
+
+```bash
+.venv/bin/python scripts/process_notebook.py <notebook_id>
+```
+
+`<notebook_id>` is the last URL segment of your notebook: `https://notebooklm.google.com/notebook/<notebook_id>`. Flags `--include-sources` and `--include-mindmap` add indexed source fulltext and mind maps. For multi-account setups use `--profile <name>`.
 
 ### How it works
 

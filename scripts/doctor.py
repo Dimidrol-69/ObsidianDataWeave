@@ -31,6 +31,37 @@ def check_command(name: str) -> bool:
     return resolved is not None
 
 
+def check_python_import(module: str, install_hint: str) -> bool:
+    """Print a status line for a Python module import."""
+    try:
+        __import__(module)
+        print(f"OK       python module `{module}`")
+        return True
+    except ImportError:
+        print(f"MISSING  python module `{module}` — install with: {install_hint}")
+        return False
+
+
+def check_notebooklm_auth() -> None:
+    """Best-effort check that notebooklm-py storage exists.
+
+    Non-fatal: prints an informational line only. The actual storage path
+    is profile-dependent, so we just look for the default location.
+    """
+    candidates = [
+        Path.home() / ".notebooklm" / "storage_state.json",
+        Path.home() / ".config" / "notebooklm" / "storage_state.json",
+    ]
+    for candidate in candidates:
+        if candidate.exists():
+            print(f"OK       notebooklm auth: {candidate}")
+            return
+    print(
+        "WARN     notebooklm auth: storage_state.json not found in default locations. "
+        "Run `notebooklm login` once before using process_notebook.py."
+    )
+
+
 def main() -> None:
     ok = True
 
@@ -75,6 +106,10 @@ def main() -> None:
     ok &= check_command("claude")
     ok &= check_command("codex")
     ok &= check_command("rclone")
+
+    # NotebookLM integration (optional: only needed for process_notebook.py)
+    check_python_import("notebooklm", 'pip install "notebooklm-py[browser]"')
+    check_notebooklm_auth()
 
     if not ok:
         sys.exit(1)

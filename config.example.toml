@@ -11,3 +11,15 @@ contacts_folder = "Networking"              # contact notes destination
 [rclone]
 remote = "gdrive:"                          # rclone remote name (check: rclone listremotes)
 staging_dir = "/tmp/dw/staging"            # temporary staging area
+
+[notebooklm]
+# NotebookLM profile name for multi-account setups (optional).
+# Run `notebooklm profile list` to see available profiles.
+# Leave empty to use the default profile set up by `notebooklm login`.
+profile = ""
+
+# Whether to fetch indexed source fulltext alongside curated notes (optional).
+include_sources = false
+
+# Whether to attach existing mind map(s) as a topic-hierarchy section (optional).
+include_mindmap = false
