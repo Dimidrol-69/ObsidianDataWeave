@@ -39,10 +39,10 @@ Use the repo-local `AGENTS.md` as the primary contract.
 
 - Process a source `.docx` document:
   `python3 scripts/process.py "Document.docx"`
-- Process a curated NotebookLM notebook:
+- Process a curated NotebookLM notebook (direct NotebookLM control):
   `python3 scripts/process_notebook.py "<notebook_id>"`
-  Add `--include-sources` to pull full source texts, `--include-mindmap` for the mindmap.
-- Fetch NotebookLM notes without atomizing (raw parsed JSON):
+  Optional: `--include-sources`, `--include-mindmap`, `--profile <name>`.
+- Fetch NotebookLM notes without atomization:
   `python3 scripts/fetch_notebook.py "<notebook_id>"`
 - Process a personal note:
   `python3 scripts/process_note.py "Note Title"`
@@ -58,26 +58,70 @@ Use the repo-local `AGENTS.md` as the primary contract.
   `python3 scripts/doctor.py`
 
 ## NotebookLM Workflow (direct control)
-- `scripts/process_notebook.py` drives the full pipeline: `fetch_notebook.py` → `atomize.py` → `generate_notes.py` → `vault_writer.py`.
-- `scripts/fetch_notebook.py` emits a path to parsed JSON that is compatible with the existing atomize/generate chain.
-- Both scripts require `notebooklm-py` (`pip install notebooklm-py[browser]` then `notebooklm login`).
-- Pass `--profile <name>` when the user mentions a non-default NotebookLM profile.
-- Stick to the local `claude` CLI rewrite path in `process_notebook.py` — do not recurse into a new Claude invocation from inside the Claude session; the script already handles that.
+
+The user curates material inside NotebookLM: adds sources, chats with them,
+saves relevant answers as notes (`notebooklm ask ... --save-as-note` or via
+the web UI), and creates notes manually. When ready, running
+`process_notebook.py <notebook_id>` pulls every note as a single batch and
+feeds it to `atomize.py`, which sees the whole corpus at once and builds
+wikilinks **between** notes from different sources. Mind maps become the
+scaffold for the MOC; source fulltext (if requested) provides extra context.
+
+Prerequisites (one-time per machine):
+- `notebooklm-py[browser]` installed in a venv (system pip is blocked by PEP 668 on Arch/Debian)
+- Playwright Chromium installed for that venv
+- A saved NotebookLM session at `~/.notebooklm/storage_state.json` (produced by `notebooklm login`)
 
 ## How "being logged in" actually works
-- NotebookLM auth is **file-based**: the session lives at `~/.notebooklm/storage_state.json` and a Playwright browser profile at `~/.notebooklm/browser_profile/`.
-- Once the user runs `notebooklm login` and signs in once, that file persists. Every subsequent run just reads it — no browser popup, no OAuth dance, no token refresh that the agent needs to handle.
-- There is nothing in memory to "log in again" per session. If `storage_state.json` exists and is valid, the scripts go through silently.
+
+The NotebookLM session is a file on disk (`~/.notebooklm/storage_state.json`
+plus a persistent browser profile at `~/.notebooklm/browser_profile/`). The
+agent does **not** hold any auth state in memory — every run of
+`fetch_notebook.py` / `process_notebook.py` re-reads that file and is
+authenticated iff it exists.
+
+Consequence: once the user has logged in once, **no browser prompt is
+needed on subsequent runs**. The agent should never suggest re-running
+`notebooklm login` unless the preflight marker below fires or the user
+asks for it explicitly (cookies expired, switching accounts, etc.).
 
 ## Handling NotebookLM Auth Errors
-If `fetch_notebook.py` or `process_notebook.py` exits with `NOTEBOOKLM_AUTH_REQUIRED`:
-1. Say that the preflight failed because `notebooklm-py` is missing or the session file is not there yet, and that login requires a real terminal window (not Claude's shell).
-2. If `.venv/` does not exist, create it: `python3 -m venv .venv`
-3. Run the setup script (installs deps, skips login intentionally because we are not on a TTY):
+
+`fetch_notebook.py` (and therefore `process_notebook.py`) does a preflight
+check via `check_auth_or_exit()`. If `storage_state.json` is missing at any
+of the default locations, it exits with code `2` and prints
+`NOTEBOOKLM_AUTH_REQUIRED: ...` on stderr **before** touching the
+NotebookLM client. When you see that marker, the user has never logged in
+on this machine (or the file was deleted).
+
+`scripts/notebooklm_setup.py` automates dependency install but intentionally
+keeps login as a separate manual step, because `notebooklm login` opens a
+browser AND then blocks on `input()` waiting for the user to press ENTER in
+a real terminal. Running the login step from Claude Code's shell (or any
+non-TTY subprocess) aborts immediately with `Aborted!`. The setup script
+detects this and refuses with exit code `3` when stdin is not a TTY.
+
+Agent protocol when you see `NOTEBOOKLM_AUTH_REQUIRED`:
+
+1. Tell the user briefly in Russian: «NotebookLM не настроен — ставлю зависимости, а логин нужно сделать самому в отдельном терминале, потому что `notebooklm login` требует настоящий TTY».
+2. Ensure a project venv exists (`.venv/`). If it does not:
+   `python3 -m venv .venv`
+3. Run the dependency installer via the venv's Python (safe in non-TTY, no login attempted):
    `.venv/bin/python scripts/notebooklm_setup.py --skip-login`
-4. Ask the user to open a fresh terminal in the repo directory and run `.venv/bin/notebooklm login`, sign in to Google in the Chromium window, come back to that terminal, and press ENTER.
-5. When the user confirms, retry the original `process_notebook.py` / `fetch_notebook.py` command.
-6. If setup exits non-zero, relay stderr verbatim and stop — do not try to pip-install things manually. Exit code `3` specifically means Claude's shell isn't a TTY, which is normal — just always pass `--skip-login` when invoking the setup script from inside Claude.
+   It may take a minute on first run (Chromium download is ~150MB).
+   If it exits non-zero, show the user its stderr and stop — do not try to recover by running individual pip/playwright commands.
+4. Ask the user to open a **separate terminal window** and run:
+   ```
+   cd <repo> && .venv/bin/notebooklm login
+   ```
+   They should sign in to Google in the Chromium window, wait for the NotebookLM homepage to load, then return to that terminal and press ENTER.
+5. When the user confirms they pressed ENTER, re-run the preflight by retrying the original `process_notebook.py <notebook_id>` command (or just check that `~/.notebooklm/storage_state.json` now exists).
+6. If the preflight no longer fires, proceed silently — no further login prompts. The session is reused across runs until cookies expire.
+
+If the session later expires, `fetch_notebook.py` may fail deeper in the
+pipeline (not via the `NOTEBOOKLM_AUTH_REQUIRED` marker, since the file
+still exists). In that case, delete `~/.notebooklm/storage_state.json`
+only after confirming with the user, and repeat steps 4–5 above.
 
 ## Deep research via research_notebook.py (do not use the upstream CLI directly)
 
