@@ -305,16 +305,38 @@ async def _run_dedupe(args: argparse.Namespace) -> int:
         sources = list(await client.sources.list(args.notebook_id))
         _log(f"Found {len(sources)} sources total")
 
+        def _is_error(src_obj) -> bool:
+            return getattr(src_obj, "status", None) == 3  # SourceStatus.ERROR
+
         seen: dict[str, object] = {}
         duplicates: list[tuple[object, str]] = []
         for src in sources:
             key = _dedupe_key(src, key_mode=args.key)
             if key is None:
                 continue
-            if key in seen:
-                duplicates.append((src, f"duplicate of {getattr(seen[key], 'id', '?')}"))
-            else:
+            existing = seen.get(key)
+            if existing is None:
                 seen[key] = src
+                continue
+            # A keeper already exists for this key. Normally we keep the
+            # first occurrence. But if the current keeper is error-state and
+            # the new candidate is healthy, swap them — otherwise, running
+            # with `--include-error` would delete BOTH the keeper (as error)
+            # AND the healthy candidate (as duplicate-of-keeper), wiping the
+            # entire group.
+            if _is_error(existing) and not _is_error(src):
+                duplicates.append(
+                    (
+                        existing,
+                        f"demoted from keeper (error state); "
+                        f"{getattr(src, 'id', '?')} is healthy",
+                    )
+                )
+                seen[key] = src
+            else:
+                duplicates.append(
+                    (src, f"duplicate of {getattr(existing, 'id', '?')}")
+                )
 
         error_flagged: list[tuple[object, str]] = []
         if args.include_error:
