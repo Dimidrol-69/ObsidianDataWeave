@@ -67,13 +67,38 @@ def load_rules() -> tuple[str, str]:
 # ── Note finding ─────────────────────────────────────────────────────────────
 
 
+def _contained(candidate: Path, vault_root: Path) -> bool:
+    """Return True iff `candidate` resolves to a path inside `vault_root`."""
+    try:
+        candidate.resolve().relative_to(vault_root.resolve())
+    except (ValueError, OSError):
+        return False
+    return True
+
+
 def find_note(query: str, config: dict) -> Path | None:
-    """Find a note in the vault by title, filename, or absolute path."""
+    """Find a note in the vault by title, filename, or absolute path.
+
+    Enforces vault containment: absolute paths and relative queries alike are
+    rejected (with a printed error) if they resolve outside of `vault_path`.
+    This prevents `process_contacts.py /etc/passwd` and `../../escape` tricks
+    from touching files archive_original() would later move.
+    """
+    vault_path = Path(config["vault"]["vault_path"])
+
     query_path = Path(query)
-    if query_path.is_absolute() and query_path.exists():
+    if query_path.is_absolute():
+        if not query_path.exists():
+            return None
+        if not _contained(query_path, vault_path):
+            print(
+                f"ERROR: Refusing to operate on '{query}' — path is outside the "
+                f"configured vault ({vault_path}).",
+                file=sys.stderr,
+            )
+            return None
         return query_path
 
-    vault_path = Path(config["vault"]["vault_path"])
     notes_folder = vault_path / config["vault"].get("notes_folder", "Notes")
     contacts_folder = vault_path / config["vault"].get("contacts_folder", "Networking")
     moc_folder = vault_path / config["vault"].get("moc_folder", "MOCs")
@@ -82,7 +107,7 @@ def find_note(query: str, config: dict) -> Path | None:
 
     for folder in [vault_path, notes_folder, contacts_folder, moc_folder]:
         candidate = folder / filename
-        if candidate.exists():
+        if candidate.exists() and _contained(candidate, vault_path):
             return candidate
 
     stem = query.removesuffix(".md")
@@ -90,7 +115,7 @@ def find_note(query: str, config: dict) -> Path | None:
         rel_parts = md_file.relative_to(vault_path).parts
         if any(part.startswith(".") for part in rel_parts):
             continue
-        if md_file.stem == stem:
+        if md_file.stem == stem and _contained(md_file, vault_path):
             return md_file
 
     return None
