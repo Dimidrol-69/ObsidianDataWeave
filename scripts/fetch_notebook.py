@@ -273,7 +273,16 @@ async def fetch_notebook_data(
                     continue
                 if not fulltext:
                     continue
-                paragraphs = content_to_paragraphs(fulltext)
+                # Upstream returns a `SourceFulltext` dataclass with a
+                # `.content: str` field, not a raw string. Older/mocked shims
+                # may return a plain string, so accept both.
+                if isinstance(fulltext, str):
+                    text = fulltext
+                else:
+                    text = getattr(fulltext, "content", "") or ""
+                if not text:
+                    continue
+                paragraphs = content_to_paragraphs(text)
                 if not paragraphs:
                     continue
                 sections.append({
