@@ -434,9 +434,18 @@ def write_contacts_result(
     if vw_result.stdout:
         print(f"  {vw_result.stdout.strip()}", file=sys.stderr)
 
-    # Archive original note
+    # Archive original note only when the full pipeline produced output.
+    # If the MOC was not generated, the user would lose the source note
+    # without getting the organizational entry point for those contacts.
     vault_path = Path(config["vault"]["vault_path"])
-    archive_original(original_path, vault_path)
+    if moc:
+        archive_original(original_path, vault_path)
+    else:
+        print(
+            "  WARNING: MOC was not generated — original note NOT archived. "
+            "Re-run to produce a complete output before archiving.",
+            file=sys.stderr,
+        )
 
 
 # ── Main ─────────────────────────────────────────────────────────────────────
