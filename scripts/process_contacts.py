@@ -186,8 +186,20 @@ def assemble_prompt(
 # ── Validation ───────────────────────────────────────────────────────────────
 
 
-def validate_contacts_result(result: dict, vault_titles: set[str]) -> list[str]:
-    """Validate the contacts JSON output."""
+def validate_contacts_result(
+    result: dict,
+    vault_titles: set[str],
+    *,
+    strict_collisions: bool = True,
+) -> list[str]:
+    """Validate the contacts JSON output.
+
+    When `strict_collisions` is True (the default, and the only safe policy
+    unless the caller explicitly passed `--on-conflict overwrite`), any
+    contact whose title already exists in the vault is reported as an error.
+    Without this check the MOC wipe / archive flow could silently overwrite
+    an unrelated note that happened to share a title with a new contact.
+    """
     errors: list[str] = []
 
     if "contacts" not in result:
@@ -236,6 +248,14 @@ def validate_contacts_result(result: dict, vault_titles: set[str]) -> list[str]:
         if title in seen_titles:
             errors.append(f"Contact '{cid}': duplicate title '{title}' in batch")
         seen_titles.add(title)
+
+        # Collision with an existing vault note
+        if strict_collisions and title and title in vault_titles:
+            errors.append(
+                f"Contact '{cid}': title '{title}' already exists in vault. "
+                "Re-run with `--on-conflict overwrite` to replace the existing "
+                "note, or rename the contact."
+            )
 
         # Body length check
         body = contact.get("body", "")
@@ -486,7 +506,13 @@ def main() -> None:
     vault_titles_set = set(vault_titles)
     valid_tags_set = set(tags)
 
-    errors = validate_contacts_result(result, vault_titles_set)
+    # Strict collisions unless the caller explicitly asked to overwrite.
+    # `--on-conflict overwrite` is a loaded pistol — vault_writer.py will
+    # clobber the existing note on disk — so require it to be explicit.
+    strict = args.on_conflict != "overwrite"
+    errors = validate_contacts_result(
+        result, vault_titles_set, strict_collisions=strict
+    )
 
     if errors:
         print("ERROR: Validation failed:", file=sys.stderr)
