@@ -2,14 +2,15 @@
 
 # ObsidianDataWeave
 
-**Research docs from Google Drive → structured atomic notes in Obsidian. One command, fully automated.**
+**Full NotebookLM control from Claude Code / Codex. Deep research, source management, note extraction — all programmatic. Plus .docx import and Zettelkasten atomization into Obsidian.**
 
-**Исследовательские документы из Google Drive → структурированные атомарные заметки в Obsidian. Одна команда, полная автоматизация.**
+**Полное управление NotebookLM из Claude Code / Codex. Deep research, управление источниками, извлечение заметок — всё программно. Плюс импорт .docx и Zettelkasten-атомизация в Obsidian.**
 
 ![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)
 ![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-blue.svg)
 ![Claude Code](https://img.shields.io/badge/Claude%20Code-Skill-blueviolet)
 ![Codex](https://img.shields.io/badge/Codex-AGENTS.md-green)
+![NotebookLM](https://img.shields.io/badge/NotebookLM-API%20Control-orange)
 
 ---
 
@@ -25,7 +26,28 @@
 
 ### Что это
 
-ObsidianDataWeave — навык для [Claude Code](https://docs.anthropic.com/en/docs/claude-code) и [Codex](https://github.com/openai/codex), который скачивает `.docx` файлы из Google Drive, разбивает их на атомарные заметки по методологии MOC + Zettelkasten, присваивает теги и вики-ссылки, и записывает результат напрямую в ваш vault Obsidian. Также умеет обогащать и атомизировать существующие заметки в vault.
+ObsidianDataWeave превращает Claude Code и Codex в полноценный пульт управления NotebookLM и вашим Obsidian vault. Запускайте deep research, управляйте источниками, вытаскивайте заметки из нотбуков — всё через одну команду на естественном языке. Параллельно импортирует `.docx` из Google Drive и атомизирует их в Zettelkasten-заметки с MOC, тегами и вики-ссылками.
+
+#### Что можно делать с NotebookLM
+
+| Возможность | Команда |
+|---|---|
+| Запустить deep/fast research в нотбук | `research_notebook.py run <id> "<запрос>"` |
+| Безопасный one-shot импорт источников (без дубликатов) | то же, обходит [баг upstream CLI](https://github.com/teng-lin/notebooklm-py/issues/241) |
+| Почистить дубли и ошибочные источники | `research_notebook.py dedupe <id>` |
+| Извлечь все заметки → атомарные заметки в Obsidian | `process_notebook.py <id>` |
+| Извлечь заметки + исходники + mind map | `process_notebook.py <id> --include-sources --include-mindmap` |
+| Скачать заметки без атомизации | `fetch_notebook.py <id>` |
+
+Вся работа с NotebookLM идёт через Python API (`notebooklm-py`), а не через CLI — один вызов, без retry-дупликации. Авторизация — файл на диске, без интерактивного браузера при каждом запуске.
+
+#### Что ещё умеет
+
+- Импорт `.docx` из Google Drive → атомарные заметки + MOC в vault
+- Обогащение и атомизация существующих заметок
+- Обработка контактов из сетевых заметок → персональные карточки + Networking MOC
+- Дедупликация vault по семантическому сходству
+- Автоматическая таксономия тегов и вики-ссылки между заметками
 
 ### Установка
 
@@ -84,12 +106,15 @@ bash install.sh --vault-path "/путь/к/вашему/vault"
 | `process МойДокумент.docx` | Полный цикл: скачать → разобрать → атомизировать → записать в vault |
 | `process МойДокумент.docx --non-interactive --on-conflict skip` | То же, без вопросов (для автоматизации) |
 | `обработай заметку "Название"` | Enrich или atomize существующей заметки |
+| `обработай контакты "Контакты"` | Разбить заметку с контактами → персональные карточки + Networking MOC |
 | `process_note "Note" --mode atomize` | Принудительная атомизация заметки |
 | `dedup --dry-run` | Показать дубликаты без изменений |
+| `запусти ресерч в ноутбуке "<id>" "<запрос>"` | Deep research в NotebookLM через API |
+| `почисти дубли в ноутбуке "<id>"` | Дедупликация источников в нотбуке |
 
-### NotebookLM как источник
+### NotebookLM: полное программное управление
 
-Помимо `.docx` из Google Drive, ObsidianDataWeave умеет брать заметки из notebook'ов NotebookLM через `scripts/process_notebook.py <notebook_id>`. Атомайзер видит все заметки нотбука как один корпус и строит вики-ссылки поверх нескольких источников одновременно.
+ObsidianDataWeave даёт Claude Code / Codex полный программный контроль над NotebookLM. Вместо ручной работы в веб-интерфейсе — вы говорите агенту что нужно, и он запускает ресерч, управляет источниками, вытаскивает заметки и атомизирует их в Obsidian. Весь API-слой работает через `notebooklm-py` как библиотеку (не CLI), что гарантирует one-shot поведение без retry-дупликации.
 
 #### Первый вход в аккаунт
 
@@ -153,24 +178,29 @@ cd /путь/к/ObsidianDataWeave
 
 ### Что происходит под капотом
 
+**NotebookLM → Obsidian:**
 ```
-Google Drive → fetch → parse → atomize (Claude) → generate → write → Obsidian vault
+NotebookLM API → fetch notes/sources/mindmaps → atomize (Claude) → generate → write → Obsidian vault
 ```
 
-1. **Fetch** — `rclone` скачивает `.docx` из Google Drive во временную директорию
-2. **Parse** — извлекает заголовки, абзацы и таблицы в JSON
-3. **Atomize** — Claude читает JSON и генерирует план атомизации (заголовки, теги, вики-ссылки)
-4. **Generate** — создаёт `.md` файлы с YAML-фронтматером
-5. **Write** — перемещает готовые заметки в папки vault, дедупликация по `(source_doc, title)`
+**Deep Research → NotebookLM:**
+```
+research_notebook.py → notebooklm-py API (one-shot) → poll → import sources → dedupe
+```
 
-Для личных заметок процесс проще:
+**Google Drive → Obsidian:**
+```
+Google Drive → rclone fetch → parse .docx → atomize (Claude) → generate → write → Obsidian vault
+```
 
+**Личные заметки:**
 ```
 Vault note → detect mode → rewrite (Claude) → write back
 ```
 
 - **Enrich** — короткая заметка → добавляет теги, вики-ссылки, расширяет текст (1 → 1)
 - **Atomize** — длинная заметка → разбивает на атомарные заметки + MOC (1 → N)
+- **Contacts** — заметка с контактами → персональные карточки + Networking MOC (1 → N)
 
 ### MOC + Zettelkasten
 
@@ -227,6 +257,11 @@ ObsidianDataWeave/
 ├── scripts/
 │   ├── process.py            # Главный пайплайн (.docx → vault)
 │   ├── process_note.py       # Обработка личных заметок (enrich/atomize)
+│   ├── process_contacts.py   # Контакты → персональные карточки + Networking MOC
+│   ├── process_notebook.py   # NotebookLM нотбук → атомарные заметки (полный пайплайн)
+│   ├── fetch_notebook.py     # Извлечение заметок из NotebookLM (без атомизации)
+│   ├── research_notebook.py  # Deep/fast research + дедупликация источников в NotebookLM
+│   ├── notebooklm_setup.py   # Установка notebooklm-py + Playwright (one-shot)
 │   ├── fetch_docx.sh         # Скачивание с Google Drive
 │   ├── parse_docx.py         # .docx → JSON
 │   ├── atomize.py            # JSON → план атомизации (через Claude)
@@ -240,13 +275,15 @@ ObsidianDataWeave/
 ├── rules/
 │   ├── atomization.md        # Правила атомизации
 │   ├── taxonomy.md           # Правила таксономии тегов
-│   └── personal_notes.md     # Правила обработки личных заметок
+│   ├── personal_notes.md     # Правила обработки личных заметок
+│   └── contacts.md           # Правила обработки контактов
 ├── templates/                # Стартовая структура vault
 ├── tests/                    # Регрессионные тесты
 ├── docs/                     # Документация для агентов
 ├── AGENTS.md                 # Контракт агента (Claude Code + Codex)
 ├── SKILL.md                  # Claude-адаптер
 ├── SKILL_PERSONAL.md         # Промпт для обработки личных заметок
+├── SKILL_CONTACTS.md         # Промпт для обработки контактов
 ├── tags.yaml                 # Каноничный список тегов
 ├── config.example.toml       # Шаблон конфигурации
 ├── install.sh                # Установщик с глобальной регистрацией
@@ -265,7 +302,28 @@ MIT — см. [LICENSE](LICENSE).
 
 ### What is this
 
-ObsidianDataWeave is a [Claude Code](https://docs.anthropic.com/en/docs/claude-code) and [Codex](https://github.com/openai/codex) skill that fetches `.docx` files from Google Drive, splits them into atomic notes using the MOC + Zettelkasten methodology, assigns tags and wikilinks, and writes the results directly to your Obsidian vault. It can also enrich and atomize existing notes in your vault.
+ObsidianDataWeave turns Claude Code and Codex into a full remote control for NotebookLM and your Obsidian vault. Run deep research, manage sources, pull notes from notebooks — all through a single natural-language command. It also imports `.docx` from Google Drive and atomizes them into Zettelkasten notes with MOC, tags, and wikilinks.
+
+#### What you can do with NotebookLM
+
+| Capability | Command |
+|---|---|
+| Run deep/fast research into a notebook | `research_notebook.py run <id> "<query>"` |
+| Safe one-shot source import (no duplicates) | same, bypasses [upstream CLI bug](https://github.com/teng-lin/notebooklm-py/issues/241) |
+| Clean up duplicate and error-state sources | `research_notebook.py dedupe <id>` |
+| Pull all notes → atomic notes in Obsidian | `process_notebook.py <id>` |
+| Pull notes + source fulltext + mind maps | `process_notebook.py <id> --include-sources --include-mindmap` |
+| Download notes without atomization | `fetch_notebook.py <id>` |
+
+All NotebookLM interaction goes through the Python API (`notebooklm-py`), not the CLI — single call, no retry duplication. Auth is a file on disk, no interactive browser on every run.
+
+#### What else it does
+
+- Import `.docx` from Google Drive → atomic notes + MOC in vault
+- Enrich and atomize existing vault notes
+- Process networking contacts → individual contact cards + Networking MOC
+- Deduplicate vault by semantic similarity
+- Automatic tag taxonomy and cross-note wikilinks
 
 ### Install
 
@@ -324,12 +382,15 @@ More examples:
 | `process MyDocument.docx` | Full cycle: download → parse → atomize → write to vault |
 | `process MyDocument.docx --non-interactive --on-conflict skip` | Same, no prompts (for automation) |
 | `process note "Title"` | Enrich or atomize an existing note |
+| `process contacts "My Contacts"` | Split contacts note → individual cards + Networking MOC |
 | `process_note "Note" --mode atomize` | Force atomization of a note |
 | `dedup --dry-run` | Show duplicates without changes |
+| `run research in notebook "<id>" "<query>"` | Deep research into NotebookLM via API |
+| `dedupe notebook sources "<id>"` | Deduplicate sources in a notebook |
 
-### NotebookLM as a source
+### NotebookLM: full programmatic control
 
-In addition to `.docx` from Google Drive, ObsidianDataWeave can pull curated notes from NotebookLM notebooks via `scripts/process_notebook.py <notebook_id>`. The atomizer sees every note in the notebook as one batch and can build wikilinks across multiple sources at once.
+ObsidianDataWeave gives Claude Code / Codex full programmatic control over NotebookLM. Instead of manual work in the web UI, you tell the agent what you need and it runs research, manages sources, pulls notes, and atomizes them into Obsidian. The entire API layer uses `notebooklm-py` as a library (not the CLI), which guarantees one-shot behavior with no retry duplication.
 
 #### First-time login
 
@@ -393,24 +454,29 @@ If a notebook was already poisoned by the broken CLI, clean it up:
 
 ### How it works
 
+**NotebookLM → Obsidian:**
 ```
-Google Drive → fetch → parse → atomize (Claude) → generate → write → Obsidian vault
+NotebookLM API → fetch notes/sources/mindmaps → atomize (Claude) → generate → write → Obsidian vault
 ```
 
-1. **Fetch** — `rclone` downloads `.docx` from Google Drive to a staging directory
-2. **Parse** — extracts headings, paragraphs, and tables into JSON
-3. **Atomize** — Claude reads JSON and generates an atom plan (titles, tags, wikilinks)
-4. **Generate** — creates `.md` files with YAML frontmatter
-5. **Write** — moves notes to vault folders, deduplicates by `(source_doc, title)`
+**Deep Research → NotebookLM:**
+```
+research_notebook.py → notebooklm-py API (one-shot) → poll → import sources → dedupe
+```
 
-For personal notes the process is simpler:
+**Google Drive → Obsidian:**
+```
+Google Drive → rclone fetch → parse .docx → atomize (Claude) → generate → write → Obsidian vault
+```
 
+**Personal notes:**
 ```
 Vault note → detect mode → rewrite (Claude) → write back
 ```
 
 - **Enrich** — short note → adds tags, wikilinks, expands text (1 → 1)
 - **Atomize** — long note → splits into atomic notes + MOC (1 → N)
+- **Contacts** — networking note → individual contact cards + Networking MOC (1 → N)
 
 ### MOC + Zettelkasten
 
@@ -467,6 +533,11 @@ ObsidianDataWeave/
 ├── scripts/
 │   ├── process.py            # Main pipeline (.docx → vault)
 │   ├── process_note.py       # Personal note processing (enrich/atomize)
+│   ├── process_contacts.py   # Contacts → individual cards + Networking MOC
+│   ├── process_notebook.py   # NotebookLM notebook → atomic notes (full pipeline)
+│   ├── fetch_notebook.py     # Pull notes from NotebookLM (without atomization)
+│   ├── research_notebook.py  # Deep/fast research + source deduplication in NotebookLM
+│   ├── notebooklm_setup.py   # Install notebooklm-py + Playwright (one-shot)
 │   ├── fetch_docx.sh         # Download from Google Drive
 │   ├── parse_docx.py         # .docx → JSON
 │   ├── atomize.py            # JSON → atom plan (via Claude)
@@ -480,13 +551,15 @@ ObsidianDataWeave/
 ├── rules/
 │   ├── atomization.md        # Atomization rules
 │   ├── taxonomy.md           # Tag taxonomy rules
-│   └── personal_notes.md     # Personal note processing rules
+│   ├── personal_notes.md     # Personal note processing rules
+│   └── contacts.md           # Contact note processing rules
 ├── templates/                # Starter vault structure
 ├── tests/                    # Regression tests
 ├── docs/                     # Agent-facing documentation
 ├── AGENTS.md                 # Agent contract (Claude Code + Codex)
 ├── SKILL.md                  # Claude adapter
 ├── SKILL_PERSONAL.md         # Prompt header for personal note processing
+├── SKILL_CONTACTS.md         # Prompt header for contact processing
 ├── tags.yaml                 # Canonical tag list
 ├── config.example.toml       # Configuration template
 ├── install.sh                # Installer with global skill registration
