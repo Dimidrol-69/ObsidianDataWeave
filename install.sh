@@ -61,7 +61,9 @@ python3 --version
 
 echo ""
 echo "== Dependencies =="
-if python3 -c "import docx, yaml" >/dev/null 2>&1; then
+# tomllib is stdlib since 3.11; on 3.10 the tomli backport (in requirements
+# with a python_version marker) is required for config.toml parsing.
+if python3 -c "import docx, yaml, sys; sys.version_info >= (3, 11) or __import__('tomli')" >/dev/null 2>&1; then
     echo "Already installed."
 else
     pip3 install -r "${REPO_DIR}/requirements.txt"
