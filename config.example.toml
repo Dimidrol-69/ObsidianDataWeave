@@ -12,6 +12,22 @@ contacts_folder = "Networking"              # contact notes destination
 remote = "gdrive:"                          # rclone remote name (check: rclone listremotes)
 staging_dir = "/tmp/dw/staging"            # temporary staging area
 
+[observability]
+# Append-only Markdown journal written by vault_writer.py.
+enabled = true
+changelog_file = "vault-changelog.md"
+
+# Destination folder for vault_digest.py --write.
+digest_folder = "Daily Digest"
+
+[inbox]
+# Folder scanned by inbox_triage.py and `dw inbox`.
+folder = "Inbox"
+
+[quality]
+# Thresholds used by quality_score.py.
+min_atomic_words = 80
+
 [notebooklm]
 # NotebookLM profile name for multi-account setups (optional).
 # Run `notebooklm profile list` to see available profiles.

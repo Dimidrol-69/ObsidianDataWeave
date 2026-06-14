@@ -26,6 +26,7 @@ All diagnostics go to stderr. Summary printed to both stdout and stderr.
 """
 
 import argparse
+from datetime import datetime
 import json
 import os
 import shutil
@@ -37,9 +38,11 @@ import yaml
 
 try:
     from scripts.config import REGISTRY_PATH, load_config as _load_config
+    from scripts.write_preview import plan_write, render_write_plan
     from scripts.wiki_models import WIKI_NOTE_TYPE, WIKI_RAW_KINDS, is_valid_slug
 except ModuleNotFoundError:
     from config import REGISTRY_PATH, load_config as _load_config
+    from write_preview import plan_write, render_write_plan
     from wiki_models import WIKI_NOTE_TYPE, WIKI_RAW_KINDS, is_valid_slug
 
 
@@ -121,6 +124,73 @@ def parse_frontmatter(content: str) -> dict:
     return parsed
 
 
+def get_observability_config(config: dict) -> dict:
+    """Return observability settings with backwards-compatible defaults."""
+    obs_cfg = config.get("observability", {})
+    return {
+        "enabled": obs_cfg.get("enabled", True),
+        "changelog_file": obs_cfg.get("changelog_file", "vault-changelog.md"),
+        "digest_folder": obs_cfg.get("digest_folder", "Daily Digest"),
+    }
+
+
+def format_changelog_row(
+    *,
+    timestamp: str,
+    operation: str,
+    title: str,
+    note_type: str,
+    source_doc: str,
+    relative_path: str,
+) -> str:
+    """Render one Markdown table row for the vault changelog."""
+    return (
+        f"| {timestamp} | {operation} | [[{title}]] | {note_type} | "
+        f"{source_doc} | {relative_path} |\n"
+    )
+
+
+def append_changelog_entry(
+    config: dict,
+    *,
+    operation: str,
+    title: str,
+    note_type: str,
+    source_doc: str,
+    relative_path: str,
+) -> None:
+    """Append a vault changelog row without blocking the original write."""
+    obs_cfg = get_observability_config(config)
+    if not obs_cfg["enabled"]:
+        return
+
+    vault_path = Path(config["vault"]["vault_path"])
+    changelog_path = vault_path / obs_cfg["changelog_file"]
+    timestamp = datetime.now().astimezone().isoformat(timespec="seconds")
+    row = format_changelog_row(
+        timestamp=timestamp,
+        operation=operation,
+        title=title,
+        note_type=note_type or "",
+        source_doc=source_doc or "",
+        relative_path=relative_path,
+    )
+
+    try:
+        changelog_path.parent.mkdir(parents=True, exist_ok=True)
+        if not changelog_path.exists():
+            changelog_path.write_text(
+                "# Vault Changelog\n\n"
+                "| Timestamp | Operation | Note | Type | Source | Path |\n"
+                "|---|---|---|---|---|---|\n",
+                encoding="utf-8",
+            )
+        with changelog_path.open("a", encoding="utf-8") as f:
+            f.write(row)
+    except OSError as exc:
+        print(f"WARNING: Could not append vault changelog: {exc}", file=sys.stderr)
+
+
 # ── Conflict resolution ─────────────────────────────────────────────────────────
 
 
@@ -192,6 +262,8 @@ def get_vault_dest(
         folder = vault_cfg.get("source_folder", "Sources")
     elif note_type == "contact":
         folder = vault_cfg.get("contacts_folder", "Networking")
+    elif note_type == "digest":
+        folder = get_observability_config(config)["digest_folder"]
     else:
         # "atomic" and any unknown type
         folder = vault_cfg.get("notes_folder", "Notes")
@@ -293,6 +365,14 @@ def _moc_sort_key(md_file: Path) -> tuple[int, str]:
     return (1 if is_late else 0, md_file.name)
 
 
+def _relative_vault_path(vault_path: Path, dest_path: Path) -> str:
+    """Return a stable POSIX-style path relative to the vault root."""
+    try:
+        return dest_path.relative_to(vault_path).as_posix()
+    except ValueError:
+        return dest_path.as_posix()
+
+
 # ── Main ────────────────────────────────────────────────────────────────────────
 
 
@@ -325,6 +405,16 @@ def main() -> None:
         choices=("skip", "overwrite"),
         default="skip",
         help="Duplicate note policy in non-interactive mode (default: skip)",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Show planned writes without copying files, updating registry, or changelog",
+    )
+    parser.add_argument(
+        "--diff",
+        action="store_true",
+        help="Include unified diffs in --dry-run output",
     )
     args = parser.parse_args()
 
@@ -387,6 +477,7 @@ def main() -> None:
     created_atomic = 0
     created_moc = 0
     skipped = 0
+    preview_plans: list[dict] = []
 
     for md_file in md_files:
         try:
@@ -416,6 +507,20 @@ def main() -> None:
         if not source_doc and title in atom_plan_source:
             source_doc = atom_plan_source[title]
 
+        # Determine vault destination folder. Wiki pages need the frontmatter
+        # to resolve <wiki_project>/<bucket>; other types ignore it.
+        try:
+            dest_dir = get_vault_dest(note_type, config, frontmatter=fm)
+        except ValueError as exc:
+            print(
+                f"ERROR: cannot route {md_file.name}: {exc}",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        vault_path = Path(config["vault"]["vault_path"])
+        dest_path = dest_dir / md_file.name
+        relative_path = _relative_vault_path(vault_path, dest_path)
+
         # Dedup check — MOC always overwrites, wiki always overwrites
         # (wiki_compile.py emits a fully merged body and would lose data if
         # the writer skipped on conflict). Other note_types check the
@@ -432,23 +537,44 @@ def main() -> None:
                 )
                 if action == "skip":
                     skipped += 1
+                    if args.dry_run:
+                        preview_plans.append(
+                            plan_write(
+                                md_file,
+                                dest_path,
+                                operation="skip",
+                                title=title,
+                                note_type=note_type or "atomic",
+                            )
+                        )
                     continue
                 # action == "overwrite": fall through to copy
 
-        # Determine vault destination folder. Wiki pages need the frontmatter
-        # to resolve <wiki_project>/<bucket>; other types ignore it.
-        try:
-            dest_dir = get_vault_dest(note_type, config, frontmatter=fm)
-        except ValueError as exc:
-            print(
-                f"ERROR: cannot route {md_file.name}: {exc}",
-                file=sys.stderr,
+        operation = "overwrite" if dest_path.exists() else "create"
+
+        if args.dry_run:
+            preview_plans.append(
+                plan_write(
+                    md_file,
+                    dest_path,
+                    operation=operation,
+                    title=title,
+                    note_type=note_type or "atomic",
+                )
             )
-            sys.exit(1)
+            continue
+
         dest_dir.mkdir(parents=True, exist_ok=True)
 
-        dest_path = dest_dir / md_file.name
         shutil.copy2(md_file, dest_path)
+        append_changelog_entry(
+            config,
+            operation=operation,
+            title=title,
+            note_type=note_type,
+            source_doc=source_doc,
+            relative_path=relative_path,
+        )
 
         # Track for registry update
         if source_doc:
@@ -463,6 +589,10 @@ def main() -> None:
             created_moc += 1
         else:
             created_atomic += 1
+
+    if args.dry_run:
+        print(render_write_plan(preview_plans, include_diff=args.diff))
+        return
 
     # Update registry atomically after all vault writes complete
     for source_doc, info in session_writes.items():
