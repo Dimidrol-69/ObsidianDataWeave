@@ -200,82 +200,6 @@ entities/postgres.md
 
 Это нужно для wiki-контракта, glob matching и тестов: они ожидают `/`, а Windows по умолчанию использует `\`.
 
-## Конфигурация
-
-Пример дополнительных секций `config.toml`:
-
-```toml
-[observability]
-enabled = true
-changelog_file = "vault-changelog.md"
-digest_folder = "Daily Digest"
-
-[inbox]
-folder = "Inbox"
-
-[quality]
-min_atomic_words = 80
-
-[notebooklm]
-profile = ""
-include_sources = false
-include_mindmap = false
-
-[wiki]
-wiki_folder = "LLM Wiki"
-default_mode = "project"
-default_lang = "en"
-max_raw_per_compile = 30
-```
-
-Существующий `config.toml` не перезаписывается автоматически. Для новых опций используйте `config.example.toml`.
-
-## Ежедневный workflow
-
-Проверить входящие заметки:
-
-```bash
-python scripts/dw.py inbox --format markdown
-```
-
-Проверить ссылки:
-
-```bash
-python scripts/dw.py links --format markdown
-```
-
-Найти слабые заметки:
-
-```bash
-python scripts/dw.py quality --format markdown --limit 25
-```
-
-Собрать digest:
-
-```bash
-python scripts/dw.py digest --write
-```
-
-Перед batch-записью посмотреть diff:
-
-```bash
-python scripts/dw.py write --staging "<dir>" --dry-run --diff --non-interactive
-```
-
-## Проверка
-
-На Windows после исправления wiki path handling полный набор тестов проходит:
-
-```bash
-uv run --with pytest --with PyYAML --with python-docx python -m pytest -q
-```
-
-Ожидаемый результат на момент подготовки README:
-
-```text
-180 passed
-```
-
 ## Основные новые файлы
 
 ```text
@@ -305,10 +229,3 @@ tests/
   test_wiki_models.py
   test_wiki_routing.py
 ```
-
-## Идеи для следующих улучшений
-
-- Добавить в `inbox_triage.py` безопасный `--apply`, который вызывает существующие process scripts.
-- Расширить `quality_score.py`: учитывать review status, changelog history и semantic similarity.
-- Добавить в `link_health.py` auto-fix режим для очевидных rename/alias случаев.
-- Сделать `load_registry()` tolerant к `utf-8-sig`, если на отдельных машинах появится warning из-за UTF-8 BOM в `processed.json`.
