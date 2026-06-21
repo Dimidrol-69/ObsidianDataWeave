@@ -2,7 +2,7 @@
 
 # ObsidianDataWeave
 
-**Full NotebookLM control from Claude Code / Codex, .docx import with Zettelkasten atomization, and a compiled LLM Wiki layer that grows by explicit merge, plus a zero-dependency FTS5 full-text memory over the whole vault — all programmatic, all into your Obsidian vault.**
+**NotebookLM, Google Drive `.docx`, Zettelkasten atomization, LLM Wiki, and FTS5 memory for your Obsidian vault. The Dimidrol fork adds a unified CLI, dry-run/diff writes, observability, quality checks, Russian command aliases, and Windows-safe paths.**
 
 ![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)
 ![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-blue.svg)
@@ -11,6 +11,9 @@
 ![NotebookLM](https://img.shields.io/badge/NotebookLM-API%20Control-orange)
 ![LLM Wiki](https://img.shields.io/badge/LLM%20Wiki-Compiled%20Knowledge-teal)
 ![FTS5 Memory](https://img.shields.io/badge/FTS5-Vault%20Memory-9cf)
+![Unified CLI](https://img.shields.io/badge/CLI-dw.py-2ea44f)
+![Dry Run](https://img.shields.io/badge/Writes-dry--run%20%2B%20diff-blue)
+![Windows CI](https://img.shields.io/badge/CI-Windows%20%2B%20Linux-informational)
 
 ---
 
@@ -22,344 +25,337 @@
 
 ## What is this
 
-ObsidianDataWeave turns Claude Code and Codex into a full remote control for NotebookLM and your Obsidian vault. Run deep research, manage sources, pull notes from notebooks — all through a single natural-language command. It also imports `.docx` from Google Drive and atomizes them into Zettelkasten notes with MOC, tags, and wikilinks. On top of all that — an isolated **LLM Wiki** layer: a Karpathy-style compiled knowledge base that grows by explicit merge, never recomputed on every query. Search across all of it is the **FTS5 memory**: a local full-text index of the whole vault (notes, wiki, NotebookLM imports) that refreshes itself after every write.
+ObsidianDataWeave turns Claude Code and Codex into a programmable control plane for NotebookLM and your Obsidian vault.
 
-### What you can do with NotebookLM
+The upstream project idea is preserved:
 
-| Capability | Command |
+- run NotebookLM research and manage sources programmatically;
+- import `.docx` documents from Google Drive;
+- atomize documents and notes into Zettelkasten-style notes;
+- generate MOCs, tags, and `[[wikilinks]]`;
+- maintain a separate **LLM Wiki** layer as a compiled knowledge base;
+- search the vault through a local SQLite **FTS5 memory** index.
+
+The Dimidrol fork adds an operational layer for day-to-day vault maintenance:
+
+- unified CLI: `python scripts/dw.py ...`;
+- safe `--dry-run --diff` for write operations;
+- append-only changelog, graph export, and daily digest;
+- link health checker, quality score, and inbox triage;
+- Russian command aliases for agents;
+- Windows-safe path normalization for wiki/memory/link tooling;
+- GitHub Actions matrix for Linux and Windows.
+
+## What this fork adds
+
+| Layer | Added behavior |
 |---|---|
-| Run deep/fast research into a notebook | `research_notebook.py run <id> "<query>"` |
-| Safe one-shot source import (no duplicates) | same, bypasses [upstream CLI bug](https://github.com/teng-lin/notebooklm-py/issues/241) |
-| Clean up duplicate and error-state sources | `research_notebook.py dedupe <id>` |
-| Pull all notes → atomic notes in Obsidian | `process_notebook.py <id>` |
-| Pull notes + source fulltext + mind maps | `process_notebook.py <id> --include-sources --include-mindmap` |
-| Download notes without atomization | `fetch_notebook.py <id>` |
+| Unified CLI | `dw.py` delegates to `write`, `graph`, `digest`, `links`, `quality`, `inbox`, `audit` |
+| Write safety | `vault_writer.py --dry-run --diff` previews writes without changing the vault |
+| Observability | `vault-changelog.md`, wikilink graph export, daily digest |
+| Ops checks | Link health, note quality scoring, Inbox triage |
+| Russian commands | Ready-to-use Russian phrases for Codex / Claude Code |
+| Windows compatibility | POSIX-style paths for Obsidian links and Windows tests |
+| CI | GitHub Actions: Ubuntu + Windows, Python 3.10-3.13 |
 
-All NotebookLM interaction goes through the Python API (`notebooklm-py`), not the CLI — single call, no retry duplication. Auth is a file on disk, no interactive browser on every run.
-
-### What else it does
-
-- Import `.docx` from Google Drive → atomic notes + MOC in vault
-- Enrich and atomize existing vault notes
-- Process networking contacts → individual contact cards + Networking MOC
-- Deduplicate vault by semantic similarity
-- Automatic tag taxonomy and cross-note wikilinks
-- **LLM Wiki** — an isolated compiled-knowledge layer (project / corpus modes, RU/EN templates, hard guard that preserves existing `[[wikilinks]]` on merge, see [section below](#llm-wiki))
-- **FTS5 Memory** — full-text search over the whole vault on stdlib SQLite: `memory_index.py search "query" --json`, bm25 ranking with snippets, incremental index kept outside the vault
-
-## Install
+## Quick start
 
 ```bash
-git clone https://github.com/howdeploy/ObsidianDataWeave.git
+git clone https://github.com/Dimidrol-69/ObsidianDataWeave.git
 cd ObsidianDataWeave
-bash install.sh --vault-path "/path/to/your/obsidian/vault"
+python -m venv .venv
+.venv/Scripts/python -m pip install -r requirements-dev.txt
+copy config.example.toml config.toml
+python scripts/doctor.py
 ```
 
-Or copy this prompt into Claude Code or Codex — it handles everything:
-
-```
-Clone https://github.com/howdeploy/ObsidianDataWeave.git and run bash install.sh --vault-path "/path/to/vault" in the cloned directory.
-```
-
-The installer will:
-- Check Python 3.10+ and install dependencies (`python-docx`, `pyyaml`)
-- Create `config.toml` with your vault path
-- Register the skill globally in `~/.claude/skills/obsidian-dataweave/`
-- Add a helper block to `~/.claude/CLAUDE.md`
-
-After installation the skill works **from any directory**.
-
-## Upgrade
-
-```bash
-cd ObsidianDataWeave && git pull && bash install.sh
-```
-
-The installer is idempotent: skill symlinks update themselves, `migrate.py`
-appends new config sections (e.g. `[memory]`) and deploys the FTS5 memory
-index. `config.toml` and the vault are never overwritten.
-
-### Install modes
-
-| Mode | Flag | What it does |
-|------|------|-------------|
-| **claude** (default) | `--mode claude` | Deps + config + global skill in `~/.claude/` |
-| **codex** | `--mode codex` | Deps + config + verify `AGENTS.md` |
-| **local** | `--mode local` | Deps + config only |
-
-## How to use
-
-After installation, just tell Claude Code what you need:
-
-```
-Process the document "Second Brain Architecture.docx"
-```
-
-```
-Process note "My thoughts on productivity"
-```
-
-```
-Download my files from Google Drive and split into atomic notes
-```
-
-```
-Check setup — run doctor
-```
-
-More examples:
-
-| What to say | What happens |
-|-------------|-------------|
-| `process MyDocument.docx` | Full cycle: download → parse → atomize → write to vault |
-| `process MyDocument.docx --non-interactive --on-conflict skip` | Same, no prompts (for automation) |
-| `process note "Title"` | Enrich or atomize an existing note |
-| `process contacts "My Contacts"` | Split contacts note → individual cards + Networking MOC |
-| `process_note "Note" --mode atomize` | Force atomization of a note |
-| `dedup --dry-run` | Show duplicates without changes |
-| `run research in notebook "<id>" "<query>"` | Deep research into NotebookLM via API |
-| `dedupe notebook sources "<id>"` | Deduplicate sources in a notebook |
-| `init wiki "<slug>"` | Scaffold a new LLM Wiki-space (project/corpus, RU/EN) |
-| `ingest into wiki "<slug>" <path>` | Drop an article / folder into `raw/<kind>/` |
-| `compile wiki "<slug>"` | Merge raw into pages (with `[[wikilink]]`-preservation guard) |
-| `lint wiki "<slug>"` | Check frontmatter, link resolution, contour isolation |
-| `search notes "<query>"` | FTS5 search across the whole vault (notes + wiki), bm25 + snippets |
-| `rebuild memory index` | Full FTS5 index rebuild (`memory_index.py build`) |
-
-## NotebookLM: full programmatic control
-
-ObsidianDataWeave gives Claude Code / Codex full programmatic control over NotebookLM. Instead of manual work in the web UI, you tell the agent what you need and it runs research, manages sources, pulls notes, and atomizes them into Obsidian. The entire API layer uses `notebooklm-py` as a library (not the CLI), which guarantees one-shot behavior with no retry duplication.
-
-### First-time login
-
-The Google session is stored in `~/.notebooklm/storage_state.json` and reused — you only log in once.
-
-1. Create a venv and install the dependencies:
+On Linux/macOS:
 
 ```bash
 python3 -m venv .venv
-.venv/bin/python scripts/notebooklm_setup.py --skip-login
+.venv/bin/python -m pip install -r requirements-dev.txt
+cp config.example.toml config.toml
+python3 scripts/doctor.py
 ```
 
-The script installs `notebooklm-py[browser]` and the Playwright Chromium browser into the active venv. The `--skip-login` flag separates installation from the interactive login — we handle the login manually in the next step because `notebooklm login` needs a real TTY.
-
-> **Arch / Manjaro / Debian:** the system `pip` is locked down by PEP 668, so a venv is required. The script auto-detects venv and no longer passes `--user`. Running it against the system Python without a venv will fail fast with guidance to create one.
-
-2. **Open a separate terminal window** and run:
-
-```bash
-cd /path/to/ObsidianDataWeave
-.venv/bin/notebooklm login
-```
-
-> Do not run this via the `!` prefix inside Claude Code or Codex — such a session has no interactive stdin, and `notebooklm login` will abort with `Aborted!` the moment it asks you to press `ENTER`.
-
-3. Sign in to Google in the Chromium window that opens and wait until the NotebookLM homepage loads.
-
-4. Return to the terminal and press **ENTER** — `storage_state.json` is saved.
-
-Verify: the file `~/.notebooklm/storage_state.json` should now exist.
-
-### Usage
-
-```bash
-.venv/bin/python scripts/process_notebook.py <notebook_id>
-```
-
-`<notebook_id>` is the last URL segment of your notebook: `https://notebooklm.google.com/notebook/<notebook_id>`. Flags `--include-sources` and `--include-mindmap` add indexed source fulltext and mind maps. For multi-account setups use `--profile <name>`.
-
-### Running deep research
-
-```bash
-.venv/bin/python scripts/research_notebook.py run "<notebook_id>" "<query>"
-.venv/bin/python scripts/research_notebook.py run "<notebook_id>" "<query>" --dry-run
-```
-
-Options: `--mode fast|deep` (default `deep`), `--source web|drive`, `--max-sources N`, `--poll-interval` / `--poll-timeout`, `--profile <name>`, `--dry-run`.
-
-> `research_notebook.py` drives `notebooklm-py` as a library — strictly one-shot. The raw CLI (`notebooklm source add-research --import-all`) duplicates sources on timeout ([upstream bug #241](https://github.com/teng-lin/notebooklm-py/issues/241)).
-
-Clean a notebook from duplicates and error-state sources:
-
-```bash
-.venv/bin/python scripts/research_notebook.py dedupe "<notebook_id>" --dry-run
-.venv/bin/python scripts/research_notebook.py dedupe "<notebook_id>" --include-error --non-interactive
-```
-
-`dedupe` groups sources by URL (title as fallback) and keeps the first occurrence; always start with `--dry-run`.
-
-## How it works
-
-**NotebookLM → Obsidian:**
-```
-NotebookLM API → fetch notes/sources/mindmaps → atomize (Claude) → generate → write → Obsidian vault
-```
-
-**Deep Research → NotebookLM:**
-```
-research_notebook.py → notebooklm-py API (one-shot) → poll → import sources → dedupe
-```
-
-**Google Drive → Obsidian:**
-```
-Google Drive → rclone fetch → parse .docx → atomize (Claude) → generate → write → Obsidian vault
-```
-
-**Personal notes:**
-```
-Vault note → detect mode → rewrite (Claude) → write back
-```
-
-**Memory (FTS5):**
-```
-any vault write → vault_writer → FTS5 index auto-refresh (outside the vault)
-search: memory_index.py search "query" → bm25 + snippets → top notes
-```
-
-- **Enrich** — short note → adds tags, wikilinks, expands text (1 → 1)
-- **Atomize** — long note → splits into atomic notes + MOC (1 → N)
-- **Contacts** — networking note → individual contact cards + Networking MOC (1 → N)
-
-## MOC + Zettelkasten
-
-**MOC (Map of Content)** — a navigation hub collecting links to all atomic notes from a document. One MOC per document.
-
-**Atomic notes** — one idea, 150–600 words, fully self-contained. Connected via `[[wikilinks]]` to each other and to the MOC.
-
-**FTS5 Memory** (`scripts/memory_index.py`) — full-text search over the whole vault on SQLite FTS5: zero dependencies (stdlib), fully local, the index lives outside the vault and refreshes automatically after every write. The search layer for agents: `python3 scripts/memory_index.py search "query" --json`.
-
-**Smart Connections** *(legacy)* — the previous search layer built on local embeddings. Superseded by the FTS5 memory: the pipeline no longer uses or requires it. You may keep the plugin for semantic suggestions in the Obsidian UI.
-
-## LLM Wiki
-
-A third knowledge layer on top of atomic notes — a **compiled wiki** in the Karpathy style. Not RAG (not recomputed on every query) and not a flat note pile (pages are interlinked and typed). It is a long-lived knowledge base that **accumulates** through explicit merge on each ingest: existing `[[wikilinks]]` must be preserved, otherwise compile fails with `WIKI_LINKS_LOST` (exit 5).
-
-The wiki lives in an isolated folder inside the vault — `<vault>/<wiki_folder>/<slug>/` (default `LLM Wiki/`). Atomic notes never appear here, and `wiki_compile.py` never reads notes outside its own wiki-space.
-
-**Two modes:**
-
-- **project** — fixed core pages: overview, architecture, components, workflows, goals-and-roadmap, glossary, open-questions. Use for documenting a single coherent system.
-- **corpus** — only entities/concepts grow as raw is ingested. Use for a reading-list / research knowledge base.
-
-**Workflow:**
-
-```bash
-# 1. Create an empty wiki-space (+ optional --lang ru|en for template language)
-python3 scripts/wiki_init.py demo --mode project --title "Demo Project"
-
-# 2. Ingest raw inputs (articles, docs, transcripts)
-python3 scripts/wiki_ingest.py demo path/to/article.md --kind articles
-python3 scripts/wiki_ingest.py demo path/to/notes/ --kind docs
-
-# 3. Compile (the LLM merges raw into pages)
-python3 scripts/wiki_compile.py demo --since-last-compile
-
-# 4. Lint the structure
-python3 scripts/wiki_lint.py demo --strict
-
-# Incremental single-page update from one new raw input
-python3 scripts/wiki_update.py demo raw/docs/new-file.md
-```
-
-All scripts go through the single `vault_writer.py` writer — atomic pipelines and the wiki share the same write boundary.
-
-**Template language.** `wiki_init.py` supports `--lang en` and `--lang ru`. The default comes from `[wiki].default_lang` in `config.toml` (falls back to `en`). Only the on-disk prose of SCHEMA.md, index.md, log.md, raw/_README.md, and core-page stubs is affected — structure and frontmatter contract are identical across languages. Wiki-spaces in different languages coexist in the same vault without conflicts.
-
-## Templates
-
-The `templates/` directory contains a starter vault structure:
-
-- `Notes/Atomic Note Example.md` — example atomic note
-- `MOCs/Topic Map - MOC.md` — example MOC
-
-## Configuration
-
-`config.toml` (created during installation, never committed):
+After copying `config.toml`, set your vault path:
 
 ```toml
 [vault]
-vault_path = "/path/to/your/obsidian/vault"   # required, absolute path
-notes_folder = "Research & Insights"           # atomic notes destination
-moc_folder = "Guides & Overviews"              # MOC files destination
-source_folder = "Sources"                       # source document references
-
-[rclone]
-remote = "gdrive:"                              # rclone remote name
-staging_dir = "/tmp/dw/staging"                # temporary staging area
+vault_path = "D:/Obsidian"
 ```
 
-## Requirements
+## Installation via install.sh
 
-- Python 3.10+ (3.11+ recommended)
-- [rclone](https://rclone.org/) configured with Google Drive access (for `.docx` import)
-- [Claude Code](https://claude.ai/code) or [Codex](https://github.com/openai/codex)
-- `vault_path` in `config.toml` — absolute path to your Obsidian vault
-- No separate database needed: SQLite with FTS5 ships inside Python (the stdlib `sqlite3` module) — it powers the FTS5 memory; `doctor.py` verifies support
+The upstream installer is preserved:
 
-**Required Obsidian plugins:**
-
-- [Local REST API](https://github.com/coddingtonbear/obsidian-local-rest-api) — HTTP interface for reading/writing vault contents. Required by MCP Obsidian
-- [MCP Obsidian](https://github.com/MarkusPfundstein/mcp-obsidian) — MCP server connecting Claude Code to Obsidian via Local REST API. Depends on Local REST API
-
-**Legacy (no longer required):**
-
-- [Smart Connections](https://github.com/brianpetro/obsidian-smart-connections) — the previous semantic-search layer (local embeddings). Superseded by the FTS5 memory (`scripts/memory_index.py`); the old config in `templates/.smart-env/` is kept for existing installs
-
-**Related projects:**
-
-- [NotebookLM++](https://github.com/howdeploy/notebooklmplusplus) — Chrome extension for [NotebookLM](https://notebooklm.google.com) that adds bulk import: web pages, YouTube videos, Shorts, playlists, entire channels, comments, and PDF page snapshots. If you use NotebookLM as a second brain alongside Obsidian, this extension covers the same workflow on the Google side: quickly gather sources into a notebook for AI analysis
-
-## Project structure
-
-```
-ObsidianDataWeave/
-├── scripts/
-│   ├── process.py            # Main pipeline (.docx → vault)
-│   ├── process_note.py       # Personal note processing (enrich/atomize)
-│   ├── process_contacts.py   # Contacts → individual cards + Networking MOC
-│   ├── process_notebook.py   # NotebookLM notebook → atomic notes (full pipeline)
-│   ├── fetch_notebook.py     # Pull notes from NotebookLM (without atomization)
-│   ├── research_notebook.py  # Deep/fast research + source deduplication in NotebookLM
-│   ├── notebooklm_setup.py   # Install notebooklm-py + Playwright (one-shot)
-│   ├── fetch_docx.sh         # Download from Google Drive
-│   ├── parse_docx.py         # .docx → JSON
-│   ├── atomize.py            # JSON → atom plan (via Claude)
-│   ├── generate_notes.py     # Plan → .md files
-│   ├── vault_writer.py       # Staging → vault (with deduplication)
-│   ├── dedup_vault.py        # Find and merge duplicate notes
-│   ├── scan_vault.py         # Scan existing vault notes
-│   ├── rewrite_backend.py    # Semantic rewrite backend (Claude CLI)
-│   ├── config.py             # Configuration loader
-│   ├── doctor.py             # Environment check
-│   ├── memory_index.py       # FTS5 memory — index/search the whole vault (build/update/search)
-│   ├── migrate.py            # Idempotent install upgrade (config + FTS5 index)
-│   ├── wiki_init.py          # LLM Wiki — create an empty wiki-space
-│   ├── wiki_ingest.py        # LLM Wiki — raw input intake (articles/docs/transcripts/assets)
-│   ├── wiki_compile.py       # LLM Wiki — main compile pipeline
-│   ├── wiki_update.py        # LLM Wiki — incremental single-page update
-│   ├── wiki_lint.py          # LLM Wiki — read-only structural check
-│   └── wiki_models.py        # LLM Wiki — ChangeSet / WikiPage / validation
-├── rules/
-│   ├── atomization.md        # Atomization rules
-│   ├── taxonomy.md           # Tag taxonomy rules
-│   ├── personal_notes.md     # Personal note processing rules
-│   ├── contacts.md           # Contact note processing rules
-│   ├── wiki_schema.md        # LLM Wiki — on-disk contract
-│   ├── wiki_compile.md       # LLM Wiki — LLM contract for compile
-│   └── wiki_update.md        # LLM Wiki — incremental merge semantics
-├── templates/                # Starter vault structure (+ templates/wiki/ for LLM Wiki)
-├── tests/                    # Regression tests
-├── docs/                     # Agent-facing documentation
-├── AGENTS.md                 # Agent contract (Claude Code + Codex)
-├── SKILL.md                  # Claude adapter
-├── SKILL_PERSONAL.md         # Prompt header for personal note processing
-├── SKILL_CONTACTS.md         # Prompt header for contact processing
-├── tags.yaml                 # Canonical tag list
-├── config.example.toml       # Configuration template
-├── install.sh                # Installer with global skill registration
-└── requirements.txt          # Python dependencies
+```bash
+bash install.sh --vault-path "/path/to/your/vault"
 ```
 
-## License
+Modes:
 
-MIT — see [LICENSE](LICENSE).
+| Mode | Flag | Behavior |
+|---|---|---|
+| Claude | `--mode claude` | Dependencies, config, global skill in `~/.claude/` |
+| Codex | `--mode codex` | Dependencies, config, `AGENTS.md` validation |
+| Local | `--mode local` | Dependencies and config only |
+
+Upgrade:
+
+```bash
+git pull
+bash install.sh
+python scripts/migrate.py
+```
+
+`migrate.py` idempotently adds missing `[memory]`, `[observability]`, `[inbox]`, and `[quality]` sections and refreshes the FTS5 index when enabled.
+
+## Two ways to run
+
+You can work through an agent or call scripts directly.
+
+| Task | Agent phrase | CLI |
+|---|---|---|
+| Check setup | `проверь настройку проекта` | `python scripts/doctor.py` |
+| Import `.docx` | `обработай документ "Document.docx"` | `python scripts/process.py "Document.docx"` |
+| Import `.docx` without prompts | `обработай документ "Document.docx" без вопросов` | `python scripts/process.py "Document.docx" --non-interactive --on-conflict skip` |
+| Process a note | `обработай заметку "Title"` | `python scripts/process_note.py "Title"` |
+| Atomize a note | `атомизируй заметку "Title" без вопросов` | `python scripts/process_note.py "Title" --mode atomize --non-interactive --on-conflict skip` |
+| Show duplicate candidates | `покажи кандидатов на дубли` | `python scripts/dedup_vault.py --dry-run --skip-claude` |
+| Preview write diff | `покажи diff перед записью из staging "<dir>"` | `python scripts/dw.py write --staging "<dir>" --dry-run --diff --non-interactive` |
+| Export graph | `покажи граф vault` | `python scripts/dw.py graph --format json` |
+| Export GraphML | `экспортируй граф vault в graphml` | `python scripts/dw.py graph --format graphml --output graph.graphml` |
+| Daily digest | `создай дайджест vault` | `python scripts/dw.py digest --write` |
+| Check links | `проверь ссылки в vault` | `python scripts/dw.py links --format markdown` |
+| Score quality | `оцени качество заметок` | `python scripts/dw.py quality --format markdown --limit 25` |
+| Triage Inbox | `разбери inbox` | `python scripts/dw.py inbox --format markdown` |
+| NotebookLM research | `запусти ресерч в notebook "<id>" по запросу "<query>"` | `python scripts/research_notebook.py run "<notebook_id>" "<query>"` |
+| Import NotebookLM | `импортируй notebook "<id>" в Obsidian` | `python scripts/process_notebook.py "<notebook_id>"` |
+| Create LLM Wiki | `создай wiki "demo"` | `python scripts/wiki_init.py demo --mode project --title "Demo"` |
+| Compile LLM Wiki | `собери wiki "demo"` | `python scripts/wiki_compile.py demo --since-last-compile` |
+| Lint LLM Wiki | `проверь wiki "demo"` | `python scripts/wiki_lint.py demo --strict` |
+
+Phrases do not have to match exactly. The agent contract lives in [AGENTS.md](AGENTS.md).
+
+## Unified CLI
+
+`dw.py` is a thin wrapper around the main operational commands:
+
+```bash
+python scripts/dw.py write --staging "<dir>" --dry-run --diff
+python scripts/dw.py graph --format graphml --output graph.graphml
+python scripts/dw.py digest --write
+python scripts/dw.py links --format markdown
+python scripts/dw.py quality --format markdown --limit 25
+python scripts/dw.py inbox --format markdown
+python scripts/dw.py audit
+```
+
+Mapping:
+
+| `dw` command | Script |
+|---|---|
+| `write` | `vault_writer.py` |
+| `graph` | `export_graph.py` |
+| `digest` | `vault_digest.py` |
+| `links` | `link_health.py` |
+| `quality` | `quality_score.py` |
+| `inbox` | `inbox_triage.py` |
+| `audit` | `audit_vault.py` |
+
+## Write safety
+
+All vault writes must go through `vault_writer.py`.
+
+Before writing, preview the plan:
+
+```bash
+python scripts/vault_writer.py --staging "<dir>" --dry-run --diff --non-interactive
+```
+
+Dry-run does not:
+
+- copy files into the vault;
+- update `processed.json`;
+- append to the changelog;
+- refresh the FTS5 index.
+
+## NotebookLM
+
+NotebookLM automation uses `notebooklm-py` as a library, not the CLI. This matters because the raw CLI command `notebooklm source add-research --import-all` can duplicate sources on timeout.
+
+Initial setup:
+
+```bash
+python -m venv .venv
+.venv/Scripts/python scripts/notebooklm_setup.py --skip-login
+```
+
+Login is done separately in an interactive terminal:
+
+```bash
+.venv/Scripts/notebooklm login
+```
+
+After login, the session is stored in `~/.notebooklm/storage_state.json`.
+
+Main commands:
+
+```bash
+python scripts/research_notebook.py run "<notebook_id>" "<query>"
+python scripts/research_notebook.py dedupe "<notebook_id>" --dry-run
+python scripts/process_notebook.py "<notebook_id>"
+python scripts/process_notebook.py "<notebook_id>" --include-sources --include-mindmap
+python scripts/fetch_notebook.py "<notebook_id>"
+```
+
+## LLM Wiki
+
+LLM Wiki is an isolated compiled-knowledge layer inside the vault:
+
+```text
+<vault>/<wiki_folder>/<slug>/
+```
+
+Modes:
+
+- `project` - fixed core pages: overview, architecture, components, workflows, goals-and-roadmap, glossary, open-questions;
+- `corpus` - wiki around entities, concepts, comparisons, and queries.
+
+Commands:
+
+```bash
+python scripts/wiki_init.py demo --mode project --title "Demo" --lang ru
+python scripts/wiki_ingest.py demo path/to/article.md --kind articles
+python scripts/wiki_compile.py demo --since-last-compile
+python scripts/wiki_lint.py demo --strict
+```
+
+Safety properties:
+
+- wiki is isolated from atomic notes, MOCs, and contacts;
+- `wiki_folder` is protected against traversal, absolute paths, and path separators;
+- compile preserves existing `[[wikilinks]]`;
+- lost links fail with `WIKI_LINKS_LOST`.
+
+## FTS5 memory
+
+FTS5 memory is a local full-text index of the entire vault on stdlib SQLite. The database lives outside the vault so Obsidian sync does not touch it.
+
+```bash
+python scripts/memory_index.py status
+python scripts/memory_index.py build
+python scripts/memory_index.py search "query" --json
+python scripts/memory_index.py update
+```
+
+If the index does not exist yet, `vault_writer.py` does not create it automatically. The first build is explicit:
+
+```bash
+python scripts/memory_index.py build
+```
+
+After that, `[memory].auto_update = true` keeps it fresh after writes.
+
+## Observability
+
+The fork adds three observability layers:
+
+| Layer | Command | Purpose |
+|---|---|---|
+| Changelog | `vault_writer.py` | append-only write journal |
+| Graph export | `python scripts/dw.py graph` | JSON/GraphML wikilink graph, PageRank |
+| Digest | `python scripts/dw.py digest --write` | daily summary from changelog, graph, and audit |
+
+Examples:
+
+```bash
+python scripts/export_graph.py --format json --output graph.json
+python scripts/export_graph.py --format graphml --output graph.graphml
+python scripts/export_graph.py --metric pagerank --top 10
+python scripts/vault_digest.py --write
+```
+
+## Vault checks
+
+```bash
+python scripts/link_health.py --format markdown
+python scripts/quality_score.py --format markdown --limit 25
+python scripts/inbox_triage.py --format markdown
+```
+
+`link_health.py` understands Obsidian wikilink variants:
+
+- `[[Page|Alias]]`
+- `[[Page#Heading]]`
+- `[[Page#^block-id]]`
+- `[[Folder/Page]]`
+- `![[Embed.png]]`
+
+## Configuration
+
+Key `config.toml` sections:
+
+```toml
+[vault]
+vault_path = "D:/Obsidian"
+notes_folder = "Research & Insights"
+moc_folder = "Guides & Overviews"
+source_folder = "Sources"
+contacts_folder = "Networking"
+
+[observability]
+enabled = true
+changelog_file = "vault-changelog.md"
+digest_folder = "Daily Digest"
+
+[inbox]
+folder = "Inbox"
+
+[quality]
+min_atomic_words = 80
+
+[wiki]
+wiki_folder = "LLM Wiki"
+default_mode = "project"
+default_lang = "en"
+
+[memory]
+enabled = true
+tokenizer = "unicode61"
+auto_update = true
+```
+
+Full example: [config.example.toml](config.example.toml).
+
+## Development
+
+```bash
+python -m pip install -r requirements-dev.txt
+pytest -q
+python -m py_compile scripts/*.py
+```
+
+CI runs tests on:
+
+- Ubuntu latest;
+- Windows latest;
+- Python 3.10, 3.11, 3.12, 3.13.
+
+## Syncing with upstream
+
+Upstream: [howdeploy/ObsidianDataWeave](https://github.com/howdeploy/ObsidianDataWeave)  
+Fork: [Dimidrol-69/ObsidianDataWeave](https://github.com/Dimidrol-69/ObsidianDataWeave)
+
+Recommended flow:
+
+```bash
+git fetch origin
+git fetch dimidrol
+git checkout main
+git merge origin/main
+pytest -q
+```
+
+If an upstream patch has already been cherry-picked, use a normal merge or `-s ours` only deliberately, to mark the upstream commit as merged without overwriting fork-specific changes.
