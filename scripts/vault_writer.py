@@ -134,6 +134,11 @@ def get_observability_config(config: dict) -> dict:
     }
 
 
+def md_cell(value: object) -> str:
+    """Escape a value for a Markdown table cell."""
+    return str(value).replace("\n", " ").replace("|", r"\|").strip()
+
+
 def format_changelog_row(
     *,
     timestamp: str,
@@ -145,8 +150,8 @@ def format_changelog_row(
 ) -> str:
     """Render one Markdown table row for the vault changelog."""
     return (
-        f"| {timestamp} | {operation} | [[{title}]] | {note_type} | "
-        f"{source_doc} | {relative_path} |\n"
+        f"| {md_cell(timestamp)} | {md_cell(operation)} | {md_cell(f'[[{title}]]')} | "
+        f"{md_cell(note_type)} | {md_cell(source_doc)} | {md_cell(relative_path)} |\n"
     )
 
 

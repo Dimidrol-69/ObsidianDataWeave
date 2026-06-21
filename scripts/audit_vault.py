@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import re
 from dataclasses import dataclass
 from difflib import SequenceMatcher
 from pathlib import Path
@@ -17,22 +16,11 @@ except ModuleNotFoundError as exc:  # pragma: no cover
 try:
     from scripts.config import load_config
     from scripts.scan_vault import SKIP_DIRS
+    from scripts.wikilinks import extract_wikilink_targets
 except ModuleNotFoundError:
     from config import load_config
     from scan_vault import SKIP_DIRS
-
-
-WIKILINK_RE = re.compile(r"\[\[([^\]]+)\]\]")
-
-
-def extract_wikilink_targets(text: str) -> set[str]:
-    """Extract normalized wikilink targets, ignoring aliases and headings."""
-    targets: set[str] = set()
-    for raw in WIKILINK_RE.findall(text):
-        target = raw.split("|", 1)[0].split("#", 1)[0].strip()
-        if target:
-            targets.add(target)
-    return targets
+    from wikilinks import extract_wikilink_targets
 
 
 @dataclass

@@ -66,6 +66,45 @@ def test_link_health_detects_broken_self_and_duplicate_titles(tmp_path):
     assert report["duplicate_titles"][0]["title"] == "Alpha"
 
 
+def test_wikilink_parser_normalizes_obsidian_variants():
+    from scripts.wikilinks import extract_wikilink_targets
+
+    text = "\n".join(
+        [
+            "[[Note A|human alias]]",
+            "[[Note A#Section]]",
+            "[[Folder/Note A]]",
+            "![[Image.png]]",
+            "[[Note A#^block-id]]",
+        ]
+    )
+
+    assert extract_wikilink_targets(text) == {"Note A"}
+
+
+def test_link_health_accepts_obsidian_link_variants(tmp_path):
+    from scripts.link_health import check_link_health
+
+    write_note(tmp_path / "Folder" / "Note A.md", "Target note.", title="Note A")
+    write_note(
+        tmp_path / "Source.md",
+        "\n".join(
+            [
+                "[[Note A|alias]]",
+                "[[Note A#Section]]",
+                "[[Folder/Note A]]",
+                "![[Image.png]]",
+                "[[Note A#^block-id]]",
+            ]
+        ),
+        title="Source",
+    )
+
+    report = check_link_health(tmp_path)
+
+    assert report["summary"]["broken_links"] == 0
+
+
 def test_quality_score_ranks_connected_complete_note_higher(tmp_path):
     from scripts.audit_vault import iter_notes
     from scripts.export_graph import build_graph
@@ -85,6 +124,36 @@ def test_quality_score_ranks_connected_complete_note_higher(tmp_path):
     assert scores["Strong"]["score"] > scores["Weak"]["score"]
     assert "thin" in scores["Weak"]["issues"]
     assert "no_tags" in scores["Weak"]["issues"]
+
+
+def test_quality_score_uses_configurable_atomic_word_threshold(tmp_path):
+    from scripts.audit_vault import iter_notes
+    from scripts.export_graph import build_graph
+    from scripts.quality_score import score_vault
+
+    write_note(
+        tmp_path / "Borderline.md",
+        "word " * 120,
+        title="Borderline",
+        tags=["ai/llm"],
+    )
+
+    default_scores = {
+        item["title"]: item
+        for item in score_vault(iter_notes(tmp_path), build_graph(tmp_path))
+    }
+    strict_scores = {
+        item["title"]: item
+        for item in score_vault(
+            iter_notes(tmp_path),
+            build_graph(tmp_path),
+            min_atomic_words=200,
+        )
+    }
+
+    assert "thin" not in default_scores["Borderline"]["issues"]
+    assert "thin" in strict_scores["Borderline"]["issues"]
+    assert strict_scores["Borderline"]["score"] < default_scores["Borderline"]["score"]
 
 
 def test_inbox_triage_classifies_common_note_shapes(tmp_path):

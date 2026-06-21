@@ -30,7 +30,13 @@ def _relative_path(path: Path, root: Path | None = None) -> str:
         return path.as_posix()
 
 
-def score_note(note: NoteRecord, graph_node: dict | None = None, *, root: Path | None = None) -> dict:
+def score_note(
+    note: NoteRecord,
+    graph_node: dict | None = None,
+    *,
+    root: Path | None = None,
+    min_atomic_words: int = 80,
+) -> dict:
     """Return a 0-100 quality score and issue tags for one note."""
     score = 100
     issues: list[str] = []
@@ -42,7 +48,7 @@ def score_note(note: NoteRecord, graph_node: dict | None = None, *, root: Path |
     if not note.tags:
         score -= 15
         issues.append("no_tags")
-    if note.note_type == "atomic" and note.words < 80:
+    if note.note_type == "atomic" and note.words < min_atomic_words:
         score -= 20
         issues.append("thin")
     if not note.links:
@@ -67,10 +73,24 @@ def score_note(note: NoteRecord, graph_node: dict | None = None, *, root: Path |
     }
 
 
-def score_vault(notes: list[NoteRecord], graph: dict, *, root: Path | None = None) -> list[dict]:
+def score_vault(
+    notes: list[NoteRecord],
+    graph: dict,
+    *,
+    root: Path | None = None,
+    min_atomic_words: int = 80,
+) -> list[dict]:
     """Score all notes, weakest first."""
     nodes = _graph_lookup(graph)
-    scores = [score_note(note, nodes.get(note.title), root=root) for note in notes]
+    scores = [
+        score_note(
+            note,
+            nodes.get(note.title),
+            root=root,
+            min_atomic_words=min_atomic_words,
+        )
+        for note in notes
+    ]
     return sorted(scores, key=lambda item: (item["score"], item["title"]))
 
 
@@ -101,7 +121,13 @@ def main() -> None:
         print(f"ERROR: Vault path does not exist: {vault_path}", file=sys.stderr)
         sys.exit(1)
 
-    scores = score_vault(iter_notes(vault_path), build_graph(vault_path), root=vault_path)
+    min_atomic_words = int(config.get("quality", {}).get("min_atomic_words", 80))
+    scores = score_vault(
+        iter_notes(vault_path),
+        build_graph(vault_path),
+        root=vault_path,
+        min_atomic_words=min_atomic_words,
+    )
     output = (
         render_markdown(scores, limit=args.limit)
         if args.format == "markdown"

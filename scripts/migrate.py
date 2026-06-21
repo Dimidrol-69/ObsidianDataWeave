@@ -8,7 +8,8 @@ Ensure-style, no version bookkeeping: each step checks reality and only does
 what is missing. Safe to run any number of times.
 
 Current steps:
-1. config.toml gets the [memory] section (FTS5 memory defaults) if absent.
+1. config.toml gets missing managed sections ([memory], [observability],
+   [inbox], [quality]) if absent.
 2. The FTS5 vault index is built (or incrementally refreshed) when
    vault_path is configured and [memory].enabled is true.
 
@@ -61,6 +62,35 @@ tokenizer = "unicode61"
 auto_update = true
 """
 
+OBSERVABILITY_SECTION = """
+[observability]
+# Append-only Markdown journal written by vault_writer.py.
+enabled = true
+changelog_file = "vault-changelog.md"
+
+# Destination folder for vault_digest.py --write.
+digest_folder = "Daily Digest"
+"""
+
+INBOX_SECTION = """
+[inbox]
+# Folder scanned by inbox_triage.py and `dw inbox`.
+folder = "Inbox"
+"""
+
+QUALITY_SECTION = """
+[quality]
+# Thresholds used by quality_score.py.
+min_atomic_words = 80
+"""
+
+MANAGED_CONFIG_SECTIONS = {
+    "memory": MEMORY_SECTION,
+    "observability": OBSERVABILITY_SECTION,
+    "inbox": INBOX_SECTION,
+    "quality": QUALITY_SECTION,
+}
+
 
 def ensure_memory_section(config_path: Path) -> str:
     """Append the [memory] block to config.toml if it is missing.
@@ -76,6 +106,28 @@ def ensure_memory_section(config_path: Path) -> str:
         text += "\n"
     config_path.write_text(text + MEMORY_SECTION, encoding="utf-8")
     return "added"
+
+
+def ensure_config_sections(config_path: Path) -> dict[str, str]:
+    """Append missing managed config sections without touching existing values."""
+    if not config_path.exists():
+        return {name: "no-config" for name in MANAGED_CONFIG_SECTIONS}
+
+    text = config_path.read_text(encoding="utf-8")
+    states: dict[str, str] = {}
+    additions: list[str] = []
+    for name, block in MANAGED_CONFIG_SECTIONS.items():
+        if f"[{name}]" in text:
+            states[name] = "present"
+        else:
+            states[name] = "added"
+            additions.append(block)
+
+    if additions:
+        if text and not text.endswith("\n"):
+            text += "\n"
+        config_path.write_text(text + "".join(additions), encoding="utf-8")
+    return states
 
 
 def ensure_index(config: dict) -> str:
@@ -103,16 +155,18 @@ def main() -> int:
     config_path = PROJECT_ROOT / "config.toml"
 
     print("== Migrate: config ==")
-    state = ensure_memory_section(config_path)
-    if state == "added":
-        print("config.toml: [memory] section added")
-    elif state == "present":
-        print("config.toml: [memory] section already present")
-    else:
+    states = ensure_config_sections(config_path)
+    if all(state == "no-config" for state in states.values()):
         print("config.toml: not found — skipping (install.sh creates it)")
+    else:
+        for name, state in states.items():
+            if state == "added":
+                print(f"config.toml: [{name}] section added")
+            elif state == "present":
+                print(f"config.toml: [{name}] section already present")
 
     print("== Migrate: FTS5 memory index ==")
-    if state == "no-config":
+    if all(state == "no-config" for state in states.values()):
         print("index: skipped (no config)")
         return 0
     config = load_config(strict=False)

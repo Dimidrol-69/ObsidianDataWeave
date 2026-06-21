@@ -32,6 +32,24 @@ def test_format_changelog_row_links_note_and_source():
     )
 
 
+def test_format_changelog_row_escapes_markdown_table_cells():
+    from scripts.vault_writer import format_changelog_row
+
+    row = format_changelog_row(
+        timestamp="2026-06-14T10:00:00+03:00",
+        operation="create",
+        title="A | B\nC",
+        note_type="atomic",
+        source_doc="source | doc.md",
+        relative_path="Notes/A | B.md",
+    )
+
+    assert "\n" not in row.rstrip("\n")
+    assert r"[[A \| B C]]" in row
+    assert r"source \| doc.md" in row
+    assert r"Notes/A \| B.md" in row
+
+
 def test_build_graph_reports_edges_orphans_and_pagerank(tmp_path):
     from scripts.export_graph import build_graph
 

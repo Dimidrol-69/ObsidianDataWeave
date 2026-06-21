@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from scripts.migrate import ensure_index, ensure_memory_section
+from scripts.migrate import ensure_config_sections, ensure_index, ensure_memory_section
 
 
 def test_ensure_memory_section_added_once(tmp_path: Path) -> None:
@@ -19,6 +19,35 @@ def test_ensure_memory_section_added_once(tmp_path: Path) -> None:
 
 def test_ensure_memory_section_no_config(tmp_path: Path) -> None:
     assert ensure_memory_section(tmp_path / "config.toml") == "no-config"
+
+
+def test_ensure_config_sections_adds_ops_sections_once(tmp_path: Path) -> None:
+    cfg = tmp_path / "config.toml"
+    cfg.write_text(
+        '[vault]\nvault_path = "/tmp/v"\n\n'
+        "[quality]\nmin_atomic_words = 200\n",
+        encoding="utf-8",
+    )
+
+    states = ensure_config_sections(cfg)
+    text = cfg.read_text(encoding="utf-8")
+
+    assert states["memory"] == "added"
+    assert states["observability"] == "added"
+    assert states["inbox"] == "added"
+    assert states["quality"] == "present"
+    assert "[memory]" in text
+    assert "[observability]" in text
+    assert "[inbox]" in text
+    assert "min_atomic_words = 200" in text
+
+    assert ensure_config_sections(cfg) == {
+        "memory": "present",
+        "observability": "present",
+        "inbox": "present",
+        "quality": "present",
+    }
+    assert text == cfg.read_text(encoding="utf-8")
 
 
 def test_ensure_index_skips_gracefully(tmp_path: Path) -> None:
