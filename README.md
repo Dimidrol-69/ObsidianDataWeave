@@ -82,7 +82,7 @@ python3 scripts/doctor.py
 
 ```toml
 [vault]
-vault_path = "D:/Obsidian"
+vault_path = "/path/vault"
 ```
 
 ## Установка через install.sh
@@ -299,7 +299,7 @@ python scripts/inbox_triage.py --format markdown
 
 ```toml
 [vault]
-vault_path = "D:/Obsidian"
+vault_path = "/path/vault"
 notes_folder = "Research & Insights"
 moc_folder = "Guides & Overviews"
 source_folder = "Sources"
