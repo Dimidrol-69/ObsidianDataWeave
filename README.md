@@ -1,8 +1,8 @@
 <div align="center">
 
-# ObsidianDataWeave
+# ObsidianDataWeave & Repair
 
-**NotebookLM, Google Drive `.docx`, Zettelkasten-атомизация, LLM Wiki и FTS5-память для Obsidian vault. Форк Dimidrol добавляет единый CLI, dry-run/diff для записей, observability-слой, проверки качества, русские команды и Windows-safe пути.**
+**NotebookLM, Google Drive `.docx`, Zettelkasten-атомизация, LLM Wiki и FTS5-память для Obsidian vault.**
 
 ![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)
 ![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-blue.svg)
