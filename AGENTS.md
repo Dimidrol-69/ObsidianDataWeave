@@ -65,18 +65,18 @@ Agents should treat this file as the canonical integration contract for both Cla
 17. Build or refresh the memory index / run the upgrade migration:
     `python3 scripts/memory_index.py build` | `update` | `status`
     `python3 scripts/migrate.py`  (idempotent: adds [memory] config, builds index)
-18. Export the vault wikilink graph:
-    `python3 scripts/export_graph.py --format json --output graph.json`
-    `python3 scripts/export_graph.py --format graphml --output graph.graphml`
-19. Build or write the daily vault digest:
+18. Build or write the daily vault digest:
     `python3 scripts/vault_digest.py`
     `python3 scripts/vault_digest.py --write`
-20. Preview staged writes with diffs:
+19. Preview staged writes with diffs:
     `python3 scripts/vault_writer.py --staging /path/to/staging --dry-run --diff`
-21. Run operational checks through the unified CLI:
+20. Run operational checks through the unified CLI:
     `python3 scripts/dw.py links --format markdown`
     `python3 scripts/dw.py quality --format markdown`
     `python3 scripts/dw.py inbox --format markdown`
+21. Connect old notes without outgoing links and strengthen weak MOCs:
+    `python3 scripts/dw.py connect --format markdown`
+    `python3 scripts/dw.py mocs --format markdown`
 
 ## Memory protocol (MUST)
 
@@ -121,13 +121,13 @@ Common user intent -> command:
 - "run dedup without prompts" -> `python3 scripts/dedup_vault.py --non-interactive --decision skip`
 - "render markdown from atom plan" -> `python3 scripts/generate_notes.py "<plan.json>"`
 - "check setup/prereqs" -> `python3 scripts/doctor.py`
-- "export vault graph" -> `python3 scripts/export_graph.py --format json`
-- "show top connected notes" -> `python3 scripts/export_graph.py --metric pagerank --top 10`
 - "create vault digest" -> `python3 scripts/vault_digest.py --write`
 - "preview staged writes" -> `python3 scripts/vault_writer.py --staging "<dir>" --dry-run --diff`
 - "check link health" -> `python3 scripts/dw.py links --format markdown`
 - "score note quality" -> `python3 scripts/dw.py quality --format markdown`
 - "triage inbox" -> `python3 scripts/dw.py inbox --format markdown`
+- "connect orphan notes" / "свяжи заметки без исходящих ссылок" -> `python3 scripts/dw.py connect --format markdown`
+- "strengthen weak MOCs" / "усиль слабые MOC" -> `python3 scripts/dw.py mocs --format markdown`
 - "run deep research in notebook" / "запусти ресерч в ноутбук" / "deep research into notebook" -> `python3 scripts/research_notebook.py run "<notebook_id>" "<query>"`
 - "dry-run research import" -> `python3 scripts/research_notebook.py run "<notebook_id>" "<query>" --dry-run`
 - "dedupe notebook sources" / "почисти дубли источников в ноутбуке" -> `python3 scripts/research_notebook.py dedupe "<notebook_id>" --dry-run`
@@ -150,13 +150,12 @@ Russian user intent -> command:
 - "покажи кандидатов на дубли" -> `python scripts/dedup_vault.py --dry-run --skip-claude`
 - "запусти полный dedup review" -> `python scripts/dedup_vault.py`
 - "покажи diff перед записью из staging \"<dir>\"" -> `python scripts/dw.py write --staging "<dir>" --dry-run --diff --non-interactive`
-- "покажи граф vault" -> `python scripts/dw.py graph --format json`
-- "экспортируй граф vault в graphml" -> `python scripts/dw.py graph --format graphml --output graph.graphml`
-- "покажи топ связанных заметок" -> `python scripts/dw.py graph --metric pagerank --top 10`
 - "создай дайджест vault" -> `python scripts/dw.py digest --write`
 - "проверь ссылки в vault" -> `python scripts/dw.py links --format markdown`
 - "оцени качество заметок" -> `python scripts/dw.py quality --format markdown --limit 25`
 - "разбери inbox" -> `python scripts/dw.py inbox --format markdown`
+- "свяжи заметки без исходящих ссылок" -> `python scripts/dw.py connect --format markdown`
+- "усиль слабые MOC" -> `python scripts/dw.py mocs --format markdown`
 - "запусти ресерч в notebook \"<id>\" по запросу \"<query>\"" -> `python scripts/research_notebook.py run "<notebook_id>" "<query>"`
 - "почисти дубли источников в notebook \"<id>\"" -> `python scripts/research_notebook.py dedupe "<notebook_id>" --dry-run`
 - "импортируй notebook \"<id>\" в Obsidian" -> `python scripts/process_notebook.py "<notebook_id>"`
@@ -268,24 +267,29 @@ overview.
   - Input: vault notes from configured vault path
   - Safe automation flags: `--non-interactive --decision merge|keep|skip`
   - Output: diagnostics to stderr, updates vault on confirmed merges
-- `scripts/export_graph.py`
-  - Input: configured vault path
-  - Output: JSON or GraphML wikilink graph; optional PageRank top list
 - `scripts/vault_digest.py`
-  - Input: configured vault path, audit report, graph export, changelog
+  - Input: configured vault path, audit report, link summary, changelog
   - Output: Markdown digest to stdout or a `digest` note written through `vault_writer.py`
 - `scripts/link_health.py`
   - Input: configured vault path
   - Output: broken links, self-links, and duplicate title report
 - `scripts/quality_score.py`
-  - Input: configured vault path and graph export
+  - Input: configured vault path
   - Output: weakest notes with quality issues
 - `scripts/inbox_triage.py`
   - Input: configured inbox folder
   - Output: recommended next action per inbox note
 - `scripts/dw.py`
-  - Input: subcommand (`write`, `graph`, `digest`, `links`, `quality`, `inbox`, `audit`)
+  - Input: subcommand (`write`, `digest`, `links`, `quality`, `inbox`, `connect`, `mocs`, `audit`)
   - Output: delegates to the corresponding script
+- `scripts/connect_orphan_notes.py`
+  - Input: configured vault path; notes without outgoing wikilinks
+  - Safe automation flags: dry-run by default; use `--apply` to modify notes
+  - Output: suggested or applied 2-4 related links per eligible note
+- `scripts/strengthen_mocs.py`
+  - Input: configured vault path; weak MOC notes
+  - Safe automation flags: dry-run by default; use `--apply` to modify MOCs
+  - Output: context/start-here/related-note sections for weak MOCs
 - `scripts/research_notebook.py`
   - Input: `run <notebook_id> "<query>"` or `dedupe <notebook_id>`
   - `run` flags: `--mode fast|deep` (default deep), `--source web|drive`, `--max-sources N`, `--poll-interval N`, `--poll-timeout N`, `--profile NAME`, `--dry-run`, `--non-interactive`
@@ -376,10 +380,11 @@ Upstream explicitly documents the escape hatch in `src/notebooklm/cli/helpers.py
 - `python3 scripts/process_notebook.py --help`
 - `python3 scripts/fetch_notebook.py --help`
 - `python3 scripts/dedup_vault.py --help`
-- `python3 scripts/export_graph.py --help`
 - `python3 scripts/vault_digest.py --help`
 - `python3 scripts/link_health.py --help`
 - `python3 scripts/quality_score.py --help`
 - `python3 scripts/inbox_triage.py --help`
+- `python3 scripts/connect_orphan_notes.py --help`
+- `python3 scripts/strengthen_mocs.py --help`
 - `python3 scripts/dw.py --help`
 - `python3 scripts/doctor.py`

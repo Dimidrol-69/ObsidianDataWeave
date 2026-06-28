@@ -1,4 +1,4 @@
-"""Tests for vault observability: changelog, graph export, and digest."""
+"""Tests for vault observability: changelog and digest."""
 
 from pathlib import Path
 
@@ -50,39 +50,6 @@ def test_format_changelog_row_escapes_markdown_table_cells():
     assert r"Notes/A \| B.md" in row
 
 
-def test_build_graph_reports_edges_orphans_and_pagerank(tmp_path):
-    from scripts.export_graph import build_graph
-
-    write_note(tmp_path / "Research" / "Alpha.md", "Links to [[Beta]].", tags=["ai/llm"])
-    write_note(tmp_path / "Research" / "Beta.md", "Target note.", tags=["ai/llm"])
-    write_note(tmp_path / "Research" / "Gamma.md", "No incoming links.", tags=["data/graph"])
-
-    graph = build_graph(tmp_path)
-
-    assert graph["summary"]["node_count"] == 3
-    assert graph["summary"]["edge_count"] == 1
-    assert graph["edges"] == [{"source": "Alpha", "target": "Beta"}]
-
-    nodes = {node["id"]: node for node in graph["nodes"]}
-    assert nodes["Alpha"]["out_degree"] == 1
-    assert nodes["Beta"]["in_degree"] == 1
-    assert nodes["Gamma"]["is_orphan"] is True
-    assert nodes["Beta"]["pagerank"] > nodes["Alpha"]["pagerank"]
-
-
-def test_graphml_export_contains_nodes_and_edges(tmp_path):
-    from scripts.export_graph import build_graph, graph_to_graphml
-
-    write_note(tmp_path / "Alpha.md", "[[Beta]]")
-    write_note(tmp_path / "Beta.md", "Target")
-
-    xml = graph_to_graphml(build_graph(tmp_path))
-
-    assert "<graphml" in xml
-    assert 'id="Alpha"' in xml
-    assert 'source="Alpha" target="Beta"' in xml
-
-
 def test_render_digest_includes_core_sections():
     from scripts.vault_digest import render_digest
 
@@ -94,10 +61,10 @@ def test_render_digest_includes_core_sections():
                 "folders": {"Research": 2, "Sources": 1},
                 "note_types": {"atomic": 2, "source": 1},
             },
-            "graph": {
-                "summary": {"node_count": 3, "edge_count": 1, "orphan_count": 1},
+            "links": {
+                "summary": {"total_links": 1, "orphan_count": 1},
                 "top_orphans": [{"title": "Gamma", "path": "Research/Gamma.md", "in_degree": 0}],
-                "top_pagerank": [{"title": "Beta", "pagerank": 0.52}],
+                "top_connected": [{"title": "Beta", "links": 2}],
             },
             "audit": {
                 "summary": {
@@ -120,8 +87,10 @@ def test_render_digest_includes_core_sections():
         }
     )
 
-    assert markdown.startswith("# Daily Digest — 2026-06-14")
+    assert markdown.startswith("# Daily Digest")
     assert "| Total notes | 3 |" in markdown
+    assert "| Wikilinks | 1 |" in markdown
     assert "[[Gamma]]" in markdown
+    assert "Top Connected Notes" in markdown
     assert "create" in markdown
     assert "Thin atomic notes" in markdown

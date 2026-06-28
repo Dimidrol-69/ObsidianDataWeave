@@ -10,15 +10,24 @@ from pathlib import Path
 try:
     from scripts.audit_vault import NoteRecord, iter_notes
     from scripts.config import load_config
-    from scripts.export_graph import build_graph
 except ModuleNotFoundError:
     from audit_vault import NoteRecord, iter_notes
     from config import load_config
-    from export_graph import build_graph
 
 
-def _graph_lookup(graph: dict) -> dict[str, dict]:
-    return {node["title"]: node for node in graph.get("nodes", [])}
+def compute_link_degrees(notes: list[NoteRecord]) -> dict[str, dict]:
+    """Compute in/out degrees from wikilinks without producing export artifacts."""
+    titles = {note.title for note in notes}
+    degrees = {
+        note.title: {"in_degree": 0, "out_degree": 0}
+        for note in notes
+    }
+    for note in notes:
+        targets = {target for target in note.links if target in titles and target != note.title}
+        degrees[note.title]["out_degree"] = len(targets)
+        for target in targets:
+            degrees[target]["in_degree"] += 1
+    return degrees
 
 
 def _relative_path(path: Path, root: Path | None = None) -> str:
@@ -32,7 +41,7 @@ def _relative_path(path: Path, root: Path | None = None) -> str:
 
 def score_note(
     note: NoteRecord,
-    graph_node: dict | None = None,
+    link_degrees: dict | None = None,
     *,
     root: Path | None = None,
     min_atomic_words: int = 80,
@@ -40,7 +49,7 @@ def score_note(
     """Return a 0-100 quality score and issue tags for one note."""
     score = 100
     issues: list[str] = []
-    graph_node = graph_node or {}
+    link_degrees = link_degrees or {}
 
     if not note.frontmatter:
         score -= 15
@@ -54,7 +63,7 @@ def score_note(
     if not note.links:
         score -= 15
         issues.append("no_outlinks")
-    if graph_node.get("in_degree", 0) == 0:
+    if link_degrees.get("in_degree", 0) == 0:
         score -= 15
         issues.append("orphan")
     if note.note_type in {"atomic", "source", "contact"} and not note.source_doc:
@@ -67,25 +76,24 @@ def score_note(
         "score": max(score, 0),
         "words": note.words,
         "note_type": note.note_type,
-        "in_degree": graph_node.get("in_degree", 0),
-        "out_degree": graph_node.get("out_degree", len(note.links)),
+        "in_degree": link_degrees.get("in_degree", 0),
+        "out_degree": link_degrees.get("out_degree", len(note.links)),
         "issues": issues,
     }
 
 
 def score_vault(
     notes: list[NoteRecord],
-    graph: dict,
     *,
     root: Path | None = None,
     min_atomic_words: int = 80,
 ) -> list[dict]:
     """Score all notes, weakest first."""
-    nodes = _graph_lookup(graph)
+    degrees = compute_link_degrees(notes)
     scores = [
         score_note(
             note,
-            nodes.get(note.title),
+            degrees.get(note.title),
             root=root,
             min_atomic_words=min_atomic_words,
         )
@@ -124,7 +132,6 @@ def main() -> None:
     min_atomic_words = int(config.get("quality", {}).get("min_atomic_words", 80))
     scores = score_vault(
         iter_notes(vault_path),
-        build_graph(vault_path),
         root=vault_path,
         min_atomic_words=min_atomic_words,
     )

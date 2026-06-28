@@ -40,7 +40,7 @@ The Dimidrol fork adds an operational layer for day-to-day vault maintenance:
 
 - unified CLI: `python scripts/dw.py ...`;
 - safe `--dry-run --diff` for write operations;
-- append-only changelog, graph export, and daily digest;
+- append-only changelog and daily digest;
 - link health checker, quality score, and inbox triage;
 - Russian command aliases for agents;
 - Windows-safe path normalization for wiki/memory/link tooling;
@@ -50,9 +50,9 @@ The Dimidrol fork adds an operational layer for day-to-day vault maintenance:
 
 | Layer | Added behavior |
 |---|---|
-| Unified CLI | `dw.py` delegates to `write`, `graph`, `digest`, `links`, `quality`, `inbox`, `audit` |
+| Unified CLI | `dw.py` delegates to `write`, `digest`, `links`, `quality`, `inbox`, `connect`, `mocs`, `audit` |
 | Write safety | `vault_writer.py --dry-run --diff` previews writes without changing the vault |
-| Observability | `vault-changelog.md`, wikilink graph export, daily digest |
+| Observability | `vault-changelog.md`, daily digest |
 | Ops checks | Link health, note quality scoring, Inbox triage |
 | Russian commands | Ready-to-use Russian phrases for Codex / Claude Code |
 | Windows compatibility | POSIX-style paths for Obsidian links and Windows tests |
@@ -124,12 +124,12 @@ You can work through an agent or call scripts directly.
 | Atomize a note | `атомизируй заметку "Title" без вопросов` | `python scripts/process_note.py "Title" --mode atomize --non-interactive --on-conflict skip` |
 | Show duplicate candidates | `покажи кандидатов на дубли` | `python scripts/dedup_vault.py --dry-run --skip-claude` |
 | Preview write diff | `покажи diff перед записью из staging "<dir>"` | `python scripts/dw.py write --staging "<dir>" --dry-run --diff --non-interactive` |
-| Export graph | `покажи граф vault` | `python scripts/dw.py graph --format json` |
-| Export GraphML | `экспортируй граф vault в graphml` | `python scripts/dw.py graph --format graphml --output graph.graphml` |
 | Daily digest | `создай дайджест vault` | `python scripts/dw.py digest --write` |
 | Check links | `проверь ссылки в vault` | `python scripts/dw.py links --format markdown` |
 | Score quality | `оцени качество заметок` | `python scripts/dw.py quality --format markdown --limit 25` |
 | Triage Inbox | `разбери inbox` | `python scripts/dw.py inbox --format markdown` |
+| Connect old cards | `свяжи заметки без исходящих ссылок` | `python scripts/dw.py connect --format markdown` |
+| Strengthen weak MOCs | `усиль слабые MOC` | `python scripts/dw.py mocs --format markdown` |
 | NotebookLM research | `запусти ресерч в notebook "<id>" по запросу "<query>"` | `python scripts/research_notebook.py run "<notebook_id>" "<query>"` |
 | Import NotebookLM | `импортируй notebook "<id>" в Obsidian` | `python scripts/process_notebook.py "<notebook_id>"` |
 | Create LLM Wiki | `создай wiki "demo"` | `python scripts/wiki_init.py demo --mode project --title "Demo"` |
@@ -144,11 +144,12 @@ Phrases do not have to match exactly. The agent contract lives in [AGENTS.md](AG
 
 ```bash
 python scripts/dw.py write --staging "<dir>" --dry-run --diff
-python scripts/dw.py graph --format graphml --output graph.graphml
 python scripts/dw.py digest --write
 python scripts/dw.py links --format markdown
 python scripts/dw.py quality --format markdown --limit 25
 python scripts/dw.py inbox --format markdown
+python scripts/dw.py connect --format markdown
+python scripts/dw.py mocs --format markdown
 python scripts/dw.py audit
 ```
 
@@ -157,11 +158,12 @@ Mapping:
 | `dw` command | Script |
 |---|---|
 | `write` | `vault_writer.py` |
-| `graph` | `export_graph.py` |
 | `digest` | `vault_digest.py` |
 | `links` | `link_health.py` |
 | `quality` | `quality_score.py` |
 | `inbox` | `inbox_triage.py` |
+| `connect` | `connect_orphan_notes.py` |
+| `mocs` | `strengthen_mocs.py` |
 | `audit` | `audit_vault.py` |
 
 ## Write safety
@@ -260,20 +262,16 @@ After that, `[memory].auto_update = true` keeps it fresh after writes.
 
 ## Observability
 
-The fork adds three observability layers:
+The fork adds two observability layers:
 
 | Layer | Command | Purpose |
 |---|---|---|
 | Changelog | `vault_writer.py` | append-only write journal |
-| Graph export | `python scripts/dw.py graph` | JSON/GraphML wikilink graph, PageRank |
-| Digest | `python scripts/dw.py digest --write` | daily summary from changelog, graph, and audit |
+| Digest | `python scripts/dw.py digest --write` | daily summary from changelog, links, and audit |
 
 Examples:
 
 ```bash
-python scripts/export_graph.py --format json --output graph.json
-python scripts/export_graph.py --format graphml --output graph.graphml
-python scripts/export_graph.py --metric pagerank --top 10
 python scripts/vault_digest.py --write
 ```
 
@@ -283,6 +281,8 @@ python scripts/vault_digest.py --write
 python scripts/link_health.py --format markdown
 python scripts/quality_score.py --format markdown --limit 25
 python scripts/inbox_triage.py --format markdown
+python scripts/connect_orphan_notes.py --format markdown
+python scripts/strengthen_mocs.py --format markdown
 ```
 
 `link_health.py` understands Obsidian wikilink variants:
@@ -292,6 +292,18 @@ python scripts/inbox_triage.py --format markdown
 - `[[Page#^block-id]]`
 - `[[Folder/Page]]`
 - `![[Embed.png]]`
+
+`connect_orphan_notes.py` finds notes with no outgoing links and suggests 2-4 links when related notes are available. It is dry-run by default. Applying changes requires an explicit flag:
+
+```bash
+python scripts/connect_orphan_notes.py --apply
+```
+
+`strengthen_mocs.py` finds weak MOCs and adds missing sections: context, start here, related notes. It is dry-run by default:
+
+```bash
+python scripts/strengthen_mocs.py --apply
+```
 
 ## Configuration
 

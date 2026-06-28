@@ -14,12 +14,12 @@ from pathlib import Path
 try:
     from scripts.audit_vault import audit_notes, iter_notes
     from scripts.config import load_config
-    from scripts.export_graph import build_graph
+    from scripts.quality_score import compute_link_degrees
     from scripts.vault_writer import get_observability_config
 except ModuleNotFoundError:
     from audit_vault import audit_notes, iter_notes
     from config import load_config
-    from export_graph import build_graph
+    from quality_score import compute_link_degrees
     from vault_writer import get_observability_config
 
 
@@ -68,11 +68,11 @@ def collect_recent_changes(config: dict, *, limit: int = 10) -> list[dict]:
 
 
 def collect_digest_data(config: dict, digest_date: str) -> dict:
-    """Collect scan, graph, audit, and changelog summaries for a digest."""
+    """Collect scan, link, audit, and changelog summaries for a digest."""
     vault_path = Path(config["vault"]["vault_path"])
     notes = iter_notes(vault_path)
-    graph = build_graph(vault_path)
     audit = audit_notes(notes)
+    degrees = compute_link_degrees(notes)
 
     folders = Counter()
     note_types = Counter()
@@ -81,24 +81,31 @@ def collect_digest_data(config: dict, digest_date: str) -> dict:
         folders[parent or "."] += 1
         note_types[note.note_type or "(none)"] += 1
 
-    orphan_nodes = sorted(
+    total_links = sum(item["out_degree"] for item in degrees.values())
+    orphan_notes = sorted(
         (
             {
-                "title": node["title"],
-                "path": node["path"],
-                "in_degree": node["in_degree"],
+                "title": note.title,
+                "path": _relative_path(vault_path, note.path),
+                "in_degree": degrees.get(note.title, {}).get("in_degree", 0),
             }
-            for node in graph["nodes"]
-            if node["is_orphan"]
+            for note in notes
+            if degrees.get(note.title, {}).get("in_degree", 0) == 0
         ),
         key=lambda item: (item["path"], item["title"]),
     )[:5]
-    top_pagerank = sorted(
+    top_connected = sorted(
         (
-            {"title": node["title"], "pagerank": node["pagerank"]}
-            for node in graph["nodes"]
+            {
+                "title": note.title,
+                "links": (
+                    degrees.get(note.title, {}).get("in_degree", 0)
+                    + degrees.get(note.title, {}).get("out_degree", 0)
+                ),
+            }
+            for note in notes
         ),
-        key=lambda item: (-item["pagerank"], item["title"]),
+        key=lambda item: (-item["links"], item["title"]),
     )[:5]
 
     return {
@@ -108,10 +115,16 @@ def collect_digest_data(config: dict, digest_date: str) -> dict:
             "folders": dict(sorted(folders.items())),
             "note_types": dict(sorted(note_types.items())),
         },
-        "graph": {
-            "summary": graph["summary"],
-            "top_orphans": orphan_nodes,
-            "top_pagerank": top_pagerank,
+        "links": {
+            "summary": {
+                "total_links": total_links,
+                "orphan_count": len([
+                    note for note in notes
+                    if degrees.get(note.title, {}).get("in_degree", 0) == 0
+                ]),
+            },
+            "top_orphans": orphan_notes,
+            "top_connected": top_connected,
         },
         "audit": {"summary": audit["summary"]},
         "recent_changes": collect_recent_changes(config),
@@ -130,7 +143,7 @@ def _table_from_mapping(mapping: dict) -> str:
 def render_digest(data: dict) -> str:
     """Render collected digest data to Markdown."""
     summary = data["summary"]
-    graph_summary = data["graph"]["summary"]
+    link_summary = data["links"]["summary"]
     audit_summary = data["audit"]["summary"]
 
     lines = [
@@ -141,9 +154,8 @@ def render_digest(data: dict) -> str:
         "| Metric | Value |",
         "|---|---:|",
         f"| Total notes | {summary['total_notes']} |",
-        f"| Graph nodes | {graph_summary['node_count']} |",
-        f"| Graph edges | {graph_summary['edge_count']} |",
-        f"| Orphan notes | {graph_summary['orphan_count']} |",
+        f"| Wikilinks | {link_summary['total_links']} |",
+        f"| Orphan notes | {link_summary['orphan_count']} |",
         "",
         "## Note Types",
         "",
@@ -157,7 +169,7 @@ def render_digest(data: dict) -> str:
         "",
     ]
 
-    orphans = data["graph"]["top_orphans"]
+    orphans = data["links"]["top_orphans"]
     if orphans:
         lines.extend(
             f"- [[{item['title']}]] - {item['path']}" for item in orphans
@@ -165,14 +177,14 @@ def render_digest(data: dict) -> str:
     else:
         lines.append("_No orphan notes._")
 
-    lines.extend(["", "## Top PageRank", ""])
-    pagerank = data["graph"]["top_pagerank"]
-    if pagerank:
+    lines.extend(["", "## Top Connected Notes", ""])
+    connected = data["links"]["top_connected"]
+    if connected:
         lines.extend(
-            f"- [[{item['title']}]] - {item['pagerank']}" for item in pagerank
+            f"- [[{item['title']}]] - {item['links']} links" for item in connected
         )
     else:
-        lines.append("_No graph nodes._")
+        lines.append("_No linked notes._")
 
     lines.extend([
         "",

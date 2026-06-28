@@ -10,11 +10,12 @@ from pathlib import Path
 
 COMMANDS = {
     "write": "vault_writer.py",
-    "graph": "export_graph.py",
     "digest": "vault_digest.py",
     "links": "link_health.py",
     "quality": "quality_score.py",
     "inbox": "inbox_triage.py",
+    "connect": "connect_orphan_notes.py",
+    "mocs": "strengthen_mocs.py",
     "audit": "audit_vault.py",
 }
 

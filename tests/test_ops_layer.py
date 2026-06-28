@@ -107,7 +107,6 @@ def test_link_health_accepts_obsidian_link_variants(tmp_path):
 
 def test_quality_score_ranks_connected_complete_note_higher(tmp_path):
     from scripts.audit_vault import iter_notes
-    from scripts.export_graph import build_graph
     from scripts.quality_score import score_vault
 
     write_note(
@@ -119,7 +118,7 @@ def test_quality_score_ranks_connected_complete_note_higher(tmp_path):
     write_note(tmp_path / "Helper.md", "Backlink to [[Strong]].", title="Helper", tags=["data/graph"])
     write_note(tmp_path / "Weak.md", "Tiny.", title="Weak", tags=[])
 
-    scores = {item["title"]: item for item in score_vault(iter_notes(tmp_path), build_graph(tmp_path))}
+    scores = {item["title"]: item for item in score_vault(iter_notes(tmp_path))}
 
     assert scores["Strong"]["score"] > scores["Weak"]["score"]
     assert "thin" in scores["Weak"]["issues"]
@@ -128,7 +127,6 @@ def test_quality_score_ranks_connected_complete_note_higher(tmp_path):
 
 def test_quality_score_uses_configurable_atomic_word_threshold(tmp_path):
     from scripts.audit_vault import iter_notes
-    from scripts.export_graph import build_graph
     from scripts.quality_score import score_vault
 
     write_note(
@@ -140,13 +138,12 @@ def test_quality_score_uses_configurable_atomic_word_threshold(tmp_path):
 
     default_scores = {
         item["title"]: item
-        for item in score_vault(iter_notes(tmp_path), build_graph(tmp_path))
+        for item in score_vault(iter_notes(tmp_path))
     }
     strict_scores = {
         item["title"]: item
         for item in score_vault(
             iter_notes(tmp_path),
-            build_graph(tmp_path),
             min_atomic_words=200,
         )
     }
@@ -166,17 +163,75 @@ def test_inbox_triage_classifies_common_note_shapes(tmp_path):
     assert classify_note_text("")["action"] == "archive"
 
 
+def test_connect_orphan_notes_builds_plan_for_unlinked_cards(tmp_path):
+    from scripts.audit_vault import iter_notes
+    from scripts.connect_orphan_notes import build_connection_plan
+
+    write_note(
+        tmp_path / "Card.md",
+        "retrieval augmented generation vector search embeddings",
+        title="Card",
+        tags=["ai/llm"],
+    )
+    write_note(
+        tmp_path / "Vector Search.md",
+        "vector search embeddings retrieval",
+        title="Vector Search",
+        tags=["ai/llm"],
+    )
+    write_note(
+        tmp_path / "RAG.md",
+        "retrieval augmented generation systems",
+        title="RAG",
+        tags=["ai/llm"],
+    )
+
+    plan = build_connection_plan(
+        iter_notes(tmp_path),
+        min_score=0.05,
+        min_links=2,
+        max_links=4,
+    )
+
+    card = next(item for item in plan if item["title"] == "Card")
+    assert {link["title"] for link in card["links"]} == {"RAG", "Vector Search"}
+
+
+def test_strengthen_mocs_adds_context_start_and_related_sections(tmp_path):
+    from scripts.audit_vault import iter_notes
+    from scripts.strengthen_mocs import build_moc_plan
+
+    write_note(
+        tmp_path / "AI MOC.md",
+        "# AI MOC\n\n- [[RAG]]",
+        title="AI MOC",
+        note_type="moc",
+        tags=["ai/llm"],
+    )
+    write_note(tmp_path / "RAG.md", "retrieval augmented generation", title="RAG", tags=["ai/llm"])
+    write_note(tmp_path / "Vector.md", "vector search embeddings", title="Vector", tags=["ai/llm"])
+
+    plan = build_moc_plan(iter_notes(tmp_path), min_score=0.05, min_links=3)
+
+    assert plan
+    updated = plan[0]["updated"]
+    assert "## Контекст" in updated
+    assert "## С чего начать" in updated
+    assert "## Связанные заметки" in updated
+
+
 def test_dw_builds_expected_script_commands():
     from scripts.dw import build_command
 
-    assert build_command(["graph", "--format", "graphml"]) == [
-        "export_graph.py",
-        "--format",
-        "graphml",
-    ]
     assert build_command(["digest", "--write"]) == ["vault_digest.py", "--write"]
     assert build_command(["links", "--format", "markdown"]) == [
         "link_health.py",
         "--format",
         "markdown",
     ]
+    assert build_command(["connect", "--format", "json"]) == [
+        "connect_orphan_notes.py",
+        "--format",
+        "json",
+    ]
+    assert build_command(["mocs", "--apply"]) == ["strengthen_mocs.py", "--apply"]
